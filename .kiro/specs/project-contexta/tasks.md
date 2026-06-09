@@ -19,7 +19,8 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     - _Requirements: 1.1, 1.2_
 
   - [ ] 1.2 Implement `contexta/config.py` — environment parsing and `ContextaConfig`
-    - Implement `ContextaConfig(BaseSettings)` with all fields and the `validate_backend` validator exactly as defined in design §3
+    - Implement `ContextaConfig(BaseSettings)` with all fields including `execution_mode: str = "UNIFIED"` and the `validate_backend` validator exactly as defined in design §3
+    - Add `validate_execution_mode` validator: accepts only `"UNIFIED"` or `"PARALLEL"`, raises `ConfigError` for any other value
     - Implement `load_config()` raising `ConfigError` on failure
     - Define `ConfigError` exception class
     - _Requirements: 1.3, 1.4, 1.5_
@@ -28,6 +29,10 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     - **Property 1: LiteLLM Backend String Acceptance** — generate arbitrary `"provider/model"` strings and assert acceptance; generate arbitrary strings without `/` and assert `ConfigError`
     - **Property 2: Missing Environment Variable Rejection** — for any non-empty subset of required env vars absent from the environment, assert `load_config()` raises `ConfigError`
     - **Validates: Requirements 1.4, 1.5**
+
+  - [ ]* 1.4 Write property test for execution mode validation
+    - **Property 24: Execution Mode Validation** — assert `"UNIFIED"` and `"PARALLEL"` are accepted; assert any other string raises `ConfigError` with a descriptive message
+    - **Validates: Requirements 1.4, 5.1**
 
 - [ ] 2. Pydantic schema layer — enums, models, and validation pipeline
   - [ ] 2.1 Implement `contexta/models/enums.py` — all four enums
@@ -66,12 +71,13 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
 - [ ] 3. SQLite data access layer
   - [ ] 3.1 Implement `contexta/db/schema.py` — DDL, `SCHEMA_VERSION`, and migration runner
     - Define all five `CREATE TABLE IF NOT EXISTS` DDL statements (including `schema_version`) as per design §5.1
+    - The `nodes` table DDL MUST include `version_tag TEXT NOT NULL` column after `node_name`
     - Implement `run_migrations(conn)` that checks `schema_version`, runs outstanding DDL, and writes the current version
     - Implement `init_database(db_path)` that opens an `aiosqlite.Connection`, enables `PRAGMA foreign_keys = ON`, and calls `run_migrations`
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
 
   - [ ] 3.2 Implement `contexta/db/models.py` — Python dataclasses mirroring DB row shapes
-    - Define `ProjectRow`, `NodeRow`, `BlueprintRow`, `InsightRow` dataclasses
+    - Define `ProjectRow`, `NodeRow` (including `version_tag: str` field), `BlueprintRow`, `InsightRow` dataclasses
     - _Requirements: 2.2, 2.3, 2.4, 2.5_
 
   - [ ] 3.3 Implement `contexta/db/repositories.py` — all async repository functions
@@ -79,6 +85,7 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     - `write_node` (with Pydantic re-validation guard as per design §5.2), `get_node`, `list_nodes_for_project`, `fork_node`, `list_all_nodes`
     - `get_active_blueprint`, `activate_blueprint` (atomic transaction — sets one active, clears all others), `save_blueprint_version`, `list_blueprints`
     - `upsert_insight` (INSERT … ON CONFLICT … DO UPDATE), `get_insights_for_tags`
+    - `write_node()` signature now includes `version_tag: str` parameter after `node_name`; INSERT uses 9 placeholders as per design §5.2
     - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 7.1, 7.2, 13.4, 14.2, 14.3_
 
   - [ ]* 3.4 Write property test for DB node write validation guard
@@ -106,7 +113,8 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     - `DIMENSION_SYSTEM_TEMPLATE` must include CRITICAL OUTPUT INSTRUCTIONS block commanding raw, unwrapped JSON output — no markdown fences, no preamble, no commentary (as per design §6.2)
     - `build_dimension_prompt(dimension, artifact_context)` must embed `master_prompt_text` as a substring of the returned system prompt
     - `build_arbitrator_prompt(payloads)` must include the same CRITICAL OUTPUT INSTRUCTIONS block in its system string
-    - Both prompt builders enforce the explicit natural-language JSON directive as a defence-in-depth safeguard for local Ollama deployments
+    - `build_unified_prompt(artifact_context)` must request a JSON array of exactly 12 objects with CRITICAL OUTPUT INSTRUCTIONS commanding a raw JSON array (no fences), one object per ReviewDimension in order
+    - Both PARALLEL and UNIFIED prompt builders enforce the explicit natural-language JSON directive as a defence-in-depth safeguard for local Ollama deployments
     - _Requirements: 5.2, 5.3_
 
   - [ ]* 5.4 Write property test for active blueprint prompt inclusion
@@ -162,6 +170,16 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     - Raises `RuntimeError` if any dimension is not `COMPLETE`; raises `ValidationError` if DB-level re-validation fails
     - _Requirements: 5.4, 2.6, 2.7_
 
+  - [ ] 7.6 Implement `contexta/pipeline/dimension_runner.py` — `make_unified_runner()` factory function
+    - Called by the pipeline coordinator when `config.execution_mode == "UNIFIED"`
+    - Makes a single LLM call via `call_llm()` requesting all 12 dimensions in one consolidated JSON array
+    - Parses the outer array; raises `UnifiedRunnerError` if response is not a list of exactly 12 items
+    - Validates each element against `ReviewNodePayload.model_validate()`; raises `UnifiedRunnerError` on any `ValidationError`
+    - Returns a `list[ReviewNodePayload]` of exactly 12 items for `commit_exploration_node()`
+    - Define `UnifiedRunnerError` exception class
+    - Pipeline coordinator: if `UNIFIED`, call `run_unified()` then `commit_exploration_node()`; if `PARALLEL`, use `TaskOrchestrator.launch_all()` then `commit_exploration_node()`
+    - _Requirements: 5.1, 5.4_
+
   - [ ]* 7.5 Write property test for Layer 1 batch commit atomicity
     - **Property 23: Layer 1 Batch Commit Atomicity** — generate a Layer 1 run with all 12 tasks COMPLETE; assert exactly one row is written to `nodes`; generate a run with at least one FAILED task; assert zero rows are written to `nodes`
     - **Validates: Requirements 5.4**
@@ -188,6 +206,7 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
   - [ ] 8.5 Implement `contexta/pipeline/scope_policy.py` — `ScopePolicyEnforcer`
     - `get_scope_findings(payloads)` filters all findings where `mitigation_routing == SCOPE_MODIFICATION`
     - `apply_routing_decision(finding, decision, metadata)` records entry in `metadata["routing_decisions"]` and returns updated metadata dict
+    - `apply_mutated_tag(metadata)` appends `#MUTATED` to `metadata["tags"]` and sets `metadata["mutated_at"]` timestamp; called after `apply_routing_decision()` when decision is `SCOPE_MODIFICATION`
     - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5_
 
   - [ ]* 8.6 Write property test for scope policy routing decision persistence
@@ -299,6 +318,7 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     - `[C]`: check `orchestrator.all_complete()` → if not, open `CompareBlockingModal` listing `incomplete_dimensions()`; if yes, run `ProactiveAdvisor.evaluate()` → if alerts, open `RiskBlockingModal` (record ACK in metadata) → call `ArbitratorEngine.run()` → store synthesis node → show `ReconciliationPanel` (Req 6.1, 6.4, 6.5, 8.2, 8.4, 8.5)
     - `[E]`: open `ExportConfirmModal` → call `JSONPacketSerializer.export()` → show confirmation with file path in footer; on error show error in footer (Req 11.1, 11.4, 11.5)
     - `[P]`: stub handler for Proposal Generator (out of MVP scope; show "not yet implemented" notification)
+    - `[Change Scope]` confirmation: after `apply_routing_decision()`, call `apply_mutated_tag()` on active node metadata and display a non-blocking TUI notification: "Scope modified. Consider re-running the Exploration Layer." (Req 9.5)
     - _Requirements: 6.1, 6.5, 7.3, 7.4, 8.2, 8.4, 8.5, 10.4, 10.5, 11.4_
 
   - [ ] 13.3 Implement node navigation within `MainScreen`
@@ -351,7 +371,7 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP delivery.
 - Each task references specific requirements for traceability — use the design document for all interface signatures.
-- The 23 correctness properties are distributed across their nearest implementation tasks to catch errors early.
+- The 24 correctness properties are distributed across their nearest implementation tasks to catch errors early.
 - No task here generates running code for Layer 3 (Decision) or Layer 4 (Learning) — those are Phase 2.
 - `[P] Run Proposal Generator` footer key is stubbed in Task 13.2 (Req 10.4 — key must exist) but not fully implemented in MVP.
 - All LLM calls in tests should use a mock/stub for `litellm.acompletion` to avoid network dependency.
@@ -364,7 +384,7 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
 {
   "waves": [
     { "id": 0, "tasks": ["1.1", "1.2"] },
-    { "id": 1, "tasks": ["1.3", "2.1"] },
+    { "id": 1, "tasks": ["1.3", "1.4", "2.1"] },
     { "id": 2, "tasks": ["2.2", "2.3"] },
     { "id": 3, "tasks": ["2.4", "2.7"] },
     { "id": 4, "tasks": ["2.5", "2.6"] },
@@ -375,7 +395,7 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     { "id": 9, "tasks": ["5.4", "6.2"] },
     { "id": 10, "tasks": ["6.3", "6.4", "7.1"] },
     { "id": 11, "tasks": ["7.2", "7.3"] },
-    { "id": 12, "tasks": ["7.4", "8.1", "8.3", "8.5"] },
+    { "id": 12, "tasks": ["7.4", "7.6", "8.1", "8.3", "8.5"] },
     { "id": 13, "tasks": ["7.5", "8.2", "8.4", "8.6", "10.1", "10.3"] },
     { "id": 14, "tasks": ["10.2", "11.1", "11.2"] },
     { "id": 15, "tasks": ["11.3", "11.4", "12.1"] },

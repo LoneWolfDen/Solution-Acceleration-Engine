@@ -166,6 +166,7 @@ ENTRYPOINT ["python", "-m", "contexta"]
 | `CONTEXTA_LLM_API_KEY` | API key if using a hosted backend | `""` |
 | `CONTEXTA_LLM_BASE_URL` | Override base URL (for Ollama) | `http://localhost:11434` |
 | `CONTEXTA_LOG_LEVEL` | Logging verbosity | `WARNING` |
+| `CONTEXTA_EXECUTION_MODE` | Execution mode: `UNIFIED` (single LLM call, token-efficient) or `PARALLEL` (12 concurrent calls) | `UNIFIED` |
 
 ### `config.py` — Environment Parsing Interface
 
@@ -177,6 +178,7 @@ class ContextaConfig(BaseSettings):
     llm_backend: str                          # CONTEXTA_LLM_BACKEND
     db_path: str = "/data/contexta.db"        # CONTEXTA_DB_PATH
     export_path: str = "/exports"             # CONTEXTA_EXPORT_PATH
+    execution_mode: str = "UNIFIED"           # CONTEXTA_EXECUTION_MODE — 'UNIFIED' or 'PARALLEL'
     llm_api_key: Optional[str] = None         # CONTEXTA_LLM_API_KEY
     llm_base_url: Optional[str] = None        # CONTEXTA_LLM_BASE_URL
     log_level: str = "WARNING"                # CONTEXTA_LOG_LEVEL
@@ -189,6 +191,14 @@ class ContextaConfig(BaseSettings):
         if "/" not in v:
             raise ValueError(
                 f"CONTEXTA_LLM_BACKEND must be in 'provider/model' format, got: {v!r}"
+            )
+        return v
+
+    @validator("execution_mode")
+    def validate_execution_mode(cls, v: str) -> str:
+        if v not in ("UNIFIED", "PARALLEL"):
+            raise ValueError(
+                f"CONTEXTA_EXECUTION_MODE must be 'UNIFIED' or 'PARALLEL', got: {v!r}"
             )
         return v
 
@@ -366,6 +376,7 @@ DDL_STATEMENTS = [
         parent_id        TEXT REFERENCES nodes(id),
         layer_type       TEXT NOT NULL,           -- 'exploration' | 'synthesis'
         node_name        TEXT NOT NULL,
+        version_tag      TEXT NOT NULL,           -- human-readable version label, e.g. 'v1', 'R[Base]-01'
         metadata_json    TEXT NOT NULL DEFAULT '{}',
         content_markdown TEXT NOT NULL DEFAULT '',
         created_at       TEXT NOT NULL             -- ISO-8601 UTC
@@ -426,6 +437,7 @@ async def write_node(
     parent_id:        Optional[str],
     layer_type:       str,
     node_name:        str,
+    version_tag:      str,
     payload:          ReviewNodePayload,
     metadata:         dict
 ) -> NodeRow:
@@ -436,8 +448,8 @@ async def write_node(
     row_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     await conn.execute(
-        "INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?)",
-        (row_id, project_id, parent_id, layer_type, node_name,
+        "INSERT INTO nodes VALUES (?,?,?,?,?,?,?,?,?)",
+        (row_id, project_id, parent_id, layer_type, node_name, version_tag,
          json.dumps(metadata), validated.model_dump_json(), now)
     )
     await conn.commit()
@@ -917,7 +929,85 @@ async def make_dimension_runner(
     return run_dimension
 ```
 
-### 9.2 Batch Commit on Layer 1 Completion
+### 9.2 UNIFIED Mode Runner
+
+When `config.execution_mode == "UNIFIED"`, the pipeline coordinator calls `make_unified_runner()` instead of `make_dimension_runner()`. A single LLM call returns all 12 dimension results in one consolidated JSON array.
+
+```python
+async def make_unified_runner(
+    config:    LLMConfig,
+    builder:   PromptBuilder,
+    registry:  ArtifactRegistry,
+) -> Callable[[], Awaitable[list[ReviewNodePayload]]]:
+    """
+    Returns a runner_fn that makes a SINGLE LLM call requesting all 12 dimension
+    reviews in one consolidated JSON array response.
+    Parses and validates each element against ReviewNodePayload.
+    Returns a list of exactly 12 validated ReviewNodePayload objects.
+    Raises UnifiedRunnerError if the response cannot be parsed or produces
+    fewer/more than 12 valid payloads.
+    """
+    artifact_context = registry.build_context_string()
+
+    async def run_unified() -> list[ReviewNodePayload]:
+        system, user = builder.build_unified_prompt(artifact_context)
+
+        # LLM call (Temperature-Zero Mode enforced inside call_llm)
+        llm_response = await call_llm(config, system, user)
+
+        # Parse outer JSON array
+        try:
+            raw_list = json.loads(llm_response.content)
+            if not isinstance(raw_list, list) or len(raw_list) != 12:
+                raise UnifiedRunnerError(
+                    f"Unified response must be a JSON array of exactly 12 objects, "
+                    f"got {type(raw_list).__name__} with "
+                    f"{len(raw_list) if isinstance(raw_list, list) else '?'} items"
+                )
+        except json.JSONDecodeError as exc:
+            raise UnifiedRunnerError(f"Unified response JSON parse failed: {exc}") from exc
+
+        # Validate each element against ReviewNodePayload
+        payloads = []
+        for i, item in enumerate(raw_list):
+            try:
+                payload = ReviewNodePayload.model_validate(item)
+                payloads.append(payload)
+            except ValidationError as exc:
+                raise UnifiedRunnerError(
+                    f"Validation failed for unified dimension {i}: {exc}"
+                ) from exc
+
+        return payloads
+
+    return run_unified
+```
+
+`PromptBuilder` gains a new method `build_unified_prompt()` in `llm/prompts.py`:
+
+```python
+    def build_unified_prompt(self, artifact_context: str) -> tuple[str, str]:
+        """Returns (system_prompt, user_prompt) for UNIFIED mode — all 12 dimensions in one call."""
+        dimensions_list = ", ".join(d.value for d in ReviewDimensionEnum)
+        system = (
+            f"You are a solution review AI. You MUST evaluate the provided proposal "
+            f"across ALL 12 dimensions simultaneously: {dimensions_list}.\n\n"
+            f"{self._blueprint.master_prompt_text}\n\n"
+            "CRITICAL OUTPUT INSTRUCTIONS:\n"
+            "- You MUST respond with a single, raw JSON array (not an object).\n"
+            "- The array MUST contain exactly 12 objects — one per dimension in the order listed above.\n"
+            "- Do NOT wrap your response in markdown code fences.\n"
+            "- Do NOT include any text before or after the JSON array.\n"
+            "- Your entire response must be a valid JSON array starting with [ and ending with ].\n"
+            f"- Each object in the array MUST conform to this schema:\n{self._schema_json}"
+        )
+        user = f"PROPOSAL ARTIFACTS:\n\n{artifact_context}"
+        return system, user
+```
+
+> **Design rationale:** `UNIFIED` mode reduces token overhead and round-trip latency for simple deployments (e.g., local Ollama with a small context window). The Pydantic/DB schema remains identical — the 12 `ReviewNodePayload` objects produced by UNIFIED mode are schema-equivalent to those produced by PARALLEL mode. The `TaskOrchestrator` is bypassed in UNIFIED mode; the pipeline coordinator calls `run_unified()` directly and then calls `commit_exploration_node()` with the resulting 12 payloads.
+
+### 9.3 Batch Commit on Layer 1 Completion
 
 After `TaskOrchestrator.launch_all()` returns, the orchestrator checks `all_complete()`.
 If true, it calls `commit_exploration_node()`:
@@ -955,7 +1045,7 @@ async def commit_exploration_node(
 
 **Design rationale:** Writing all 12 payloads in a single commit prevents the `nodes` table from ever containing a partial Layer 1 record (e.g., 7 of 12 dimensions committed before a crash). The in-memory `DimensionTask.payload` collection acts as the intermediate accumulator. If any dimension fails validation, `task.state = FAILED` and the user can retry that dimension independently before the commit is attempted.
 
-### 9.3 Layer 1 Initiation Sequence
+### 9.4 Layer 1 Initiation Sequence
 
 ```
 User triggers Layer 1
@@ -969,19 +1059,18 @@ Check: at least one artifact ingested?
   No  ──► Blocking error modal "No source files ingested"
   Yes ──┐
         ▼
-TaskOrchestrator.launch_all()
-  → 12 asyncio coroutines running concurrently
-  → Each coroutine:
-       1. LLM call (temperature=0.0, json_object)
-       2. ReviewNodePayload.model_validate_json()
-       3. Store validated payload in DimensionTask.payload (in-memory only)
-       4. Emit state_change callback → TUI updates DimensionRow widget
-       │
-       ▼
-→ TaskOrchestrator.launch_all()  [all 12 complete]
-       │
-       ▼
-all_complete() == True?
+config.execution_mode == 'UNIFIED'?
+  Yes ──► run_unified()
+           → single LLM call (temperature=0.0, json_object)
+           → parse JSON array of 12 items
+           → validate each against ReviewNodePayload
+           → store all 12 in-memory
+  No  ──► TaskOrchestrator.launch_all()
+           → 12 asyncio coroutines running concurrently
+           → each: LLM call → validate → store in DimensionTask.payload
+           │
+           ▼
+all payloads validated?
   Yes ──► commit_exploration_node() → single write_node() to SQLite
   No  ──► At least one dimension FAILED — user retries before commit
 ```
@@ -1131,7 +1220,23 @@ class ScopePolicyEnforcer:
         })
         metadata["routing_decisions"] = decisions
         return metadata
+
+    def apply_mutated_tag(self, metadata: dict) -> dict:
+        """
+        Appends '#MUTATED' to the node's tag list in metadata_json when a scope
+        change is explicitly approved by the user.
+        Called immediately after apply_routing_decision() when decision == SCOPE_MODIFICATION.
+        Returns updated metadata dict.
+        """
+        tags = metadata.get("tags", [])
+        if "#MUTATED" not in tags:
+            tags.append("#MUTATED")
+        metadata["tags"] = tags
+        metadata["mutated_at"] = datetime.now(timezone.utc).isoformat()
+        return metadata
 ```
+
+> **MUTATED tag purpose:** When a user approves a scope change via the `[Change Scope]` confirmation modal, the original LLM review was conducted against the pre-change artifact context. The `#MUTATED` tag on the node's metadata signals that the Layer 1 exploration results are no longer fully aligned with the current scope definition. The TUI surfaces a non-blocking notification: *"Scope has been modified. Consider re-running the Exploration Layer for updated findings."* This preserves the audit trail without forcing an immediate re-run.
 
 ---
 
@@ -1646,3 +1751,11 @@ All non-fatal errors surface in the TUI footer bar using a `notify()` call on th
 *For any* Layer 1 run where all 12 dimension tasks reach `COMPLETE` state, exactly one row must be written to the `nodes` table containing all 12 dimension payloads in `metadata_json`. *For any* Layer 1 run where at least one dimension is in `FAILED` state, zero rows must be written to the `nodes` table as a result of that run.
 
 **Validates: Requirements 5.4**
+
+---
+
+### Property 24: Execution Mode Validation and Routing
+
+*For any* string value of `CONTEXTA_EXECUTION_MODE`, the `ContextaConfig` validator must accept `"UNIFIED"` and `"PARALLEL"` and reject all other values with a descriptive `ConfigError`. *For any* valid `execution_mode`, the pipeline coordinator must route to `make_unified_runner()` when `execution_mode == "UNIFIED"` and to `TaskOrchestrator.launch_all()` when `execution_mode == "PARALLEL"`. The 12 `ReviewNodePayload` objects produced by either path must be schema-equivalent.
+
+**Validates: Requirements 1.4, 5.1**
