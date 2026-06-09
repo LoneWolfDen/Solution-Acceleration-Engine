@@ -1,38 +1,9 @@
-# Python
 __pycache__/
-*.py[cod]
+*.pyc
 *.pyo
-*.pyd
-*.so
-*.egg
+.coverage
+.hypothesis/
 *.egg-info/
 dist/
 build/
-.eggs/
-
-# Virtual environments
-.venv/
-venv/
-env/
-
-# Testing
 .pytest_cache/
-.hypothesis/
-.coverage
-htmlcov/
-coverage.xml
-
-# Packaging
-*.whl
-
-# Docker
-*.dockerignore
-
-# OS
-.DS_Store
-Thumbs.db
-
-# IDE
-.idea/
-.vscode/
-*.swp
