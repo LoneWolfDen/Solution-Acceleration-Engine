@@ -103,9 +103,11 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     - **Validates: Requirements 5.2, 6.2**
 
   - [ ] 5.3 Implement `contexta/llm/prompts.py` — `PromptBuilder` class
+    - `DIMENSION_SYSTEM_TEMPLATE` must include CRITICAL OUTPUT INSTRUCTIONS block commanding raw, unwrapped JSON output — no markdown fences, no preamble, no commentary (as per design §6.2)
     - `build_dimension_prompt(dimension, artifact_context)` must embed `master_prompt_text` as a substring of the returned system prompt
-    - `build_arbitrator_prompt(payloads)` as per design §6.2
-    - _Requirements: 5.3_
+    - `build_arbitrator_prompt(payloads)` must include the same CRITICAL OUTPUT INSTRUCTIONS block in its system string
+    - Both prompt builders enforce the explicit natural-language JSON directive as a defence-in-depth safeguard for local Ollama deployments
+    - _Requirements: 5.2, 5.3_
 
   - [ ]* 5.4 Write property test for active blueprint prompt inclusion
     - **Property 11: Active Blueprint Prompt Inclusion** — for any `master_prompt_text` value `T` and any `ReviewDimensionEnum` value `D`, assert `build_dimension_prompt(D, ...)` system string contains `T`
@@ -146,10 +148,23 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     - **Validates: Requirements 5.1**
 
   - [ ] 7.3 Implement `contexta/pipeline/dimension_runner.py` — `make_dimension_runner()` factory function
-    - Chains: `call_llm()` → `ReviewNodePayload.model_validate_json()` → `write_node()`
+    - The runner function performs LLM call + Pydantic validation ONLY — it does NOT write to the database
+    - Returns validated `ReviewNodePayload` to `DimensionTask.payload` (in-memory accumulator)
     - Raises `DimensionValidationError` on `ValidationError`; `TaskOrchestrator` catches it and marks task `FAILED`
     - Define `DimensionValidationError` exception class
     - _Requirements: 3.8, 3.9, 5.2, 5.3, 5.4, 5.8_
+
+  - [ ] 7.4 Implement `commit_exploration_node()` — batch DB commit on Layer 1 completion
+    - Called by the pipeline coordinator after `TaskOrchestrator.all_complete()` returns `True`
+    - Calls `orchestrator.get_all_payloads()` to collect all 12 validated `ReviewNodePayload` objects from in-memory state
+    - Builds `combined_metadata = {"dimensions": [p.model_dump() for p in payloads], "completed_at": ...}`
+    - Executes a single `write_node()` call — the nodes table never contains a partial Layer 1 record
+    - Raises `RuntimeError` if any dimension is not `COMPLETE`; raises `ValidationError` if DB-level re-validation fails
+    - _Requirements: 5.4, 2.6, 2.7_
+
+  - [ ]* 7.5 Write property test for Layer 1 batch commit atomicity
+    - **Property 23: Layer 1 Batch Commit Atomicity** — generate a Layer 1 run with all 12 tasks COMPLETE; assert exactly one row is written to `nodes`; generate a run with at least one FAILED task; assert zero rows are written to `nodes`
+    - **Validates: Requirements 5.4**
 
 - [ ] 8. Pipeline — Layer 2 synthesis
   - [ ] 8.1 Implement `contexta/pipeline/arbitrator.py` — `ArbitratorEngine` and `ArbitratorResult`
@@ -184,8 +199,11 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
 
 - [ ] 10. Admin layer — Dream Cycle and Blueprint Manager
   - [ ] 10.1 Implement `contexta/admin/dream_cycle.py` — `DreamCycleWorker`
-    - `run(conn)` iterates all `layer_type='exploration'` nodes, extracts RED findings, calls `upsert_insight` per `(tag, HIGH_RISK_{dimension})` pair
-    - Continues processing on per-node errors (no abort); logs errors but does not re-raise
+    - `run(conn)` executes a single SQL query using `json_each(n.metadata_json, '$.dimensions')` as a table-valued function to extract RED-confidence dimension entries directly within SQLite — no full Python-level blob deserialization
+    - SQL query: `SELECT p.global_tags, json_extract(dim.value, '$.dimension') FROM nodes n JOIN projects p ON p.id = n.project_id JOIN json_each(n.metadata_json, '$.dimensions') AS dim WHERE n.layer_type = 'exploration' AND json_extract(dim.value, '$.overall_confidence') = 'RED'`
+    - Python loop iterates only the filtered `(global_tags, dimension_name)` result rows — not raw node blobs
+    - Calls `upsert_insight(conn, tag, f"HIGH_RISK_{dimension_name.upper()}")` per `(tag, dimension)` pair
+    - Continues processing on per-row errors (no abort); logs errors but does not re-raise
     - Returns count of rows created or updated
     - _Requirements: 13.2, 13.4, 13.6_
 
@@ -200,8 +218,10 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
 
 - [ ] 11. Export and import layer
   - [ ] 11.1 Implement `contexta/export/serializer.py` — `JSONPacketSerializer`
-    - `export(packet, output_path)` writes via temp file + atomic `rename` to prevent partial files
-    - Raises `ExportError` (wrapping `OSError`) on any filesystem failure; cleans up temp file
+    - `export(packet, output_path)` writes to a `.tmp` file in the same parent directory, then calls `shutil.move(str(tmp_path), str(output_path))` for cross-device-safe atomic rename
+    - `shutil.move()` is used instead of `Path.rename()` to prevent `EXDEV` (cross-device link) errors when `/exports` is a Docker volume mount on a different filesystem than `/tmp`
+    - On `OSError`, deletes the `.tmp` file if it exists and raises `ExportError` — no partial file is left on disk
+    - Raises `ExportError` (wrapping `OSError`) on any filesystem failure
     - Define `ExportError` exception class
     - _Requirements: 11.1, 11.2, 11.3, 11.5_
 
@@ -223,13 +243,16 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     - `DimensionStateChanged(dimension, state, error)`
     - `ArtifactIngested(artifact)`
     - `AdvisoryAlertDetected(alerts)`
-    - _Requirements: 5.5, 5.7, 4.2_
+    - `CitationJumpRequested(file_path, line_start, line_end)` — posted by `PipelineView` when an `IssueFinding` is highlighted/selected; carries `file_path`, `line_start`, `line_end` from `finding.citations[0]`
+    - _Requirements: 5.5, 5.7, 4.2, 10.8_
 
   - [ ] 12.2 Implement `contexta/tui/widgets/artifact_view.py` — `ArtifactView` widget
     - Left pane (30% width): `ListView` of ingested files showing filename and line count
     - `TextLog` (scrollable) for file content preview on selection
     - Posts `ArtifactIngested` message on new registration
-    - _Requirements: 4.2, 4.3, 4.4, 10.2_
+    - Handles `CitationJumpRequested` messages: on receipt, scrolls the file content preview to bring `line_start` into view and applies a distinct highlight style to all lines in `[line_start, line_end]`
+    - Highlight clears when a different finding is selected or the user navigates away
+    - _Requirements: 4.2, 4.3, 4.4, 10.2, 10.9_
 
   - [ ] 12.3 Implement `contexta/tui/widgets/dimension_row.py` — `DimensionRow` widget
     - One instance per `ReviewDimensionEnum`
@@ -257,6 +280,10 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     - `BlueprintErrorModal`: no active blueprint; dismiss only (Req 14.5)
     - _Requirements: 6.5, 7.3, 8.3, 8.4, 9.5, 11.3, 14.5_
 
+  - [ ]* 12.7 Write property test for citation jump target accuracy
+    - **Property 22: Citation Jump Target Accuracy** — for any `IssueFinding` with at least one `SourceCitation`, assert that selecting the finding in `PipelineView` emits a `CitationJumpRequested` message whose `file_path`, `line_start`, and `line_end` exactly match `finding.citations[0]`
+    - **Validates: Requirements 10.8, 10.9**
+
 - [ ] 13. Textual TUI — screens and application entry point
   - [ ] 13.1 Implement `contexta/tui/screens/main_screen.py` — `MainScreen`
     - `ContextaHeader` showing current project name, active node name, Admin Tab access indicator
@@ -264,7 +291,8 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     - `ContextaFooter` with labelled keys: `[F] Fork Iteration`, `[C] Compare`, `[P] Run Proposal Generator`, `[E] Export Flat JSON Packet`
     - Footer key bindings respond within 200ms by triggering action or opening modal
     - Full keyboard navigation (no mouse required)
-    - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6_
+    - Wire `CitationJumpRequested` message flow: when a finding is selected in `PipelineView`, the posted `CitationJumpRequested` is handled by `ArtifactView` to scroll and highlight the target line range (Req 10.8, 10.9)
+    - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.8, 10.9_
 
   - [ ] 13.2 Wire footer key bindings to pipeline actions in `MainScreen`
     - `[F]`: open `ForkNameModal` → on confirm call `fork_node()` → update header node name (Req 7.3, 7.4)
@@ -323,7 +351,7 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
 
 - Tasks marked with `*` are optional and can be skipped for faster MVP delivery.
 - Each task references specific requirements for traceability — use the design document for all interface signatures.
-- The 21 correctness properties are distributed across their nearest implementation tasks to catch errors early.
+- The 23 correctness properties are distributed across their nearest implementation tasks to catch errors early.
 - No task here generates running code for Layer 3 (Decision) or Layer 4 (Learning) — those are Phase 2.
 - `[P] Run Proposal Generator` footer key is stubbed in Task 13.2 (Req 10.4 — key must exist) but not fully implemented in MVP.
 - All LLM calls in tests should use a mock/stub for `litellm.acompletion` to avoid network dependency.
@@ -347,13 +375,13 @@ All tasks are in Python 3.11+. The design document at `.kiro/specs/project-conte
     { "id": 9, "tasks": ["5.4", "6.2"] },
     { "id": 10, "tasks": ["6.3", "6.4", "7.1"] },
     { "id": 11, "tasks": ["7.2", "7.3"] },
-    { "id": 12, "tasks": ["8.1", "8.3", "8.5"] },
-    { "id": 13, "tasks": ["8.2", "8.4", "8.6", "10.1", "10.3"] },
+    { "id": 12, "tasks": ["7.4", "8.1", "8.3", "8.5"] },
+    { "id": 13, "tasks": ["7.5", "8.2", "8.4", "8.6", "10.1", "10.3"] },
     { "id": 14, "tasks": ["10.2", "11.1", "11.2"] },
     { "id": 15, "tasks": ["11.3", "11.4", "12.1"] },
     { "id": 16, "tasks": ["12.2", "12.3"] },
     { "id": 17, "tasks": ["12.4", "12.5"] },
-    { "id": 18, "tasks": ["12.6", "13.1"] },
+    { "id": 18, "tasks": ["12.6", "12.7", "13.1"] },
     { "id": 19, "tasks": ["13.2", "13.3", "13.4"] },
     { "id": 20, "tasks": ["13.5"] },
     { "id": 21, "tasks": ["13.6", "14.1"] },
