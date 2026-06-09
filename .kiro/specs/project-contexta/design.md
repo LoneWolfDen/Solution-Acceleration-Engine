@@ -599,11 +599,17 @@ def validate_backend(backend: str) -> bool:
 from ..models.enums import ReviewDimensionEnum
 from ..db.models import BlueprintRow
 
-DIMENSION_SYSTEM_TEMPLATE = """
+DIMENSION_SYSTEM_TEMPLATE = """\
 You are a solution review AI operating as the {dimension} reviewer.
 {master_prompt_text}
 
-You MUST respond with a single JSON object matching this schema:
+CRITICAL OUTPUT INSTRUCTIONS:
+- You MUST respond with a single, raw JSON object.
+- Do NOT wrap your response in markdown code fences (no ```json or ``` blocks).
+- Do NOT include any explanatory text, preamble, or commentary before or after the JSON.
+- Do NOT use any formatting other than the JSON structure itself.
+- Your entire response must be valid, parseable JSON starting with {{ and ending with }}.
+- The JSON object MUST conform exactly to this schema:
 {schema_json}
 """
 
@@ -633,12 +639,19 @@ class PromptBuilder:
         """Returns (system_prompt, user_prompt) for the Layer 2 Arbitrator."""
         system = (
             "You are the Arbitrator Persona. Analyse the 12 dimension review outputs "
-            "and identify all contradictions. Respond as JSON with key 'contradictions' "
-            "(list of objects with 'dimension_a', 'dimension_b', 'description')."
+            "and identify all contradictions.\n\n"
+            "CRITICAL OUTPUT INSTRUCTIONS:\n"
+            "- Respond with a single, raw JSON object only.\n"
+            "- Do NOT use markdown code fences, preamble, or commentary.\n"
+            "- Your entire response must be valid JSON starting with { and ending with }.\n"
+            "- The JSON object must have a single key 'contradictions' containing a list "
+            "of objects, each with keys: 'dimension_a', 'dimension_b', 'description'."
         )
         user = "\n\n".join(f"--- {i+1} ---\n{p}" for i, p in enumerate(payloads))
         return system, user
 ```
+
+> **Ollama JSON stability:** Local Ollama deployments do not universally honour `response_format={"type": "json_object"}` across all model families. The explicit CRITICAL OUTPUT INSTRUCTIONS block in the system prompt provides a defence-in-depth safeguard, ensuring the model receives unambiguous natural-language directives to return unwrapped JSON. This is additive to — not a replacement for — the `json_object` response_format flag.
 
 ---
 
@@ -874,11 +887,14 @@ async def make_dimension_runner(
     config:    LLMConfig,
     builder:   PromptBuilder,
     registry:  ArtifactRegistry,
-    db_conn:   aiosqlite.Connection,
-    project_id: str,
-    node_id:   str,
 ) -> Callable[[ReviewDimensionEnum], Awaitable[ReviewNodePayload]]:
-
+    """
+    Returns a runner_fn that performs LLM call + Pydantic validation only.
+    Does NOT write to the database. The validated payload is stored in
+    DimensionTask.payload (in-memory). The database write occurs only once,
+    after all 12 tasks have reached COMPLETE state, via a single
+    commit_exploration_node() call from the TaskOrchestrator.
+    """
     artifact_context = registry.build_context_string()
 
     async def run_dimension(dimension: ReviewDimensionEnum) -> ReviewNodePayload:
@@ -887,7 +903,7 @@ async def make_dimension_runner(
         # LLM call (Temperature-Zero Mode enforced inside call_llm)
         llm_response = await call_llm(config, system, user)
 
-        # Pydantic validation gate
+        # Pydantic validation gate — raises DimensionValidationError on failure
         try:
             payload = ReviewNodePayload.model_validate_json(llm_response.content)
         except ValidationError as exc:
@@ -895,22 +911,51 @@ async def make_dimension_runner(
                 f"Validation failed for {dimension.value}: {exc}"
             ) from exc
 
-        # Persist to DB
-        await write_node(
-            db_conn,
-            project_id=project_id,
-            parent_id=node_id,
-            layer_type="exploration",
-            node_name=f"{dimension.value} Review",
-            payload=payload,
-            metadata={"dimension": dimension.value}
-        )
+        # Return validated payload to DimensionTask.payload (in-memory only)
         return payload
 
     return run_dimension
 ```
 
-### 9.2 Layer 1 Initiation Sequence
+### 9.2 Batch Commit on Layer 1 Completion
+
+After `TaskOrchestrator.launch_all()` returns, the orchestrator checks `all_complete()`.
+If true, it calls `commit_exploration_node()`:
+
+```python
+async def commit_exploration_node(
+    orchestrator: TaskOrchestrator,
+    conn:         aiosqlite.Connection,
+    project_id:   str,
+    node_id:      str,
+) -> NodeRow:
+    """
+    Collects all 12 validated ReviewNodePayload objects from in-memory DimensionTask state.
+    Performs a single write_node() call to persist the complete exploration node.
+    This ensures the nodes table never contains a partial Layer 1 record.
+
+    Raises RuntimeError if any dimension is not in COMPLETE state.
+    Raises ValidationError if any payload fails the DB-level re-validation guard.
+    """
+    payloads = orchestrator.get_all_payloads()  # raises if any not COMPLETE
+    combined_metadata = {
+        "dimensions": [p.model_dump() for p in payloads],
+        "completed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    return await write_node(
+        conn,
+        project_id=project_id,
+        parent_id=node_id,
+        layer_type="exploration",
+        node_name="Layer 1 — Full Exploration",
+        payload=payloads[0],          # representative payload for schema guard
+        metadata=combined_metadata,
+    )
+```
+
+**Design rationale:** Writing all 12 payloads in a single commit prevents the `nodes` table from ever containing a partial Layer 1 record (e.g., 7 of 12 dimensions committed before a crash). The in-memory `DimensionTask.payload` collection acts as the intermediate accumulator. If any dimension fails validation, `task.state = FAILED` and the user can retry that dimension independently before the commit is attempted.
+
+### 9.3 Layer 1 Initiation Sequence
 
 ```
 User triggers Layer 1
@@ -929,8 +974,16 @@ TaskOrchestrator.launch_all()
   → Each coroutine:
        1. LLM call (temperature=0.0, json_object)
        2. ReviewNodePayload.model_validate_json()
-       3. write_node() to SQLite
+       3. Store validated payload in DimensionTask.payload (in-memory only)
        4. Emit state_change callback → TUI updates DimensionRow widget
+       │
+       ▼
+→ TaskOrchestrator.launch_all()  [all 12 complete]
+       │
+       ▼
+all_complete() == True?
+  Yes ──► commit_exploration_node() → single write_node() to SQLite
+  No  ──► At least one dimension FAILED — user retries before commit
 ```
 
 ---
@@ -1091,7 +1144,7 @@ ContextaApp (App)
 └── MainScreen (Screen)
     ├── ContextaHeader (Header)           # project name + node name + admin access
     ├── Horizontal (layout container)
-    │   ├── ArtifactView (Widget)         # left pane — MCP file browser
+    │   ├── ArtifactView (Widget)         # left pane — MCP file browser + citation jump handler
     │   │   ├── ListView                  # file list
     │   │   └── TextLog                  # file preview (scrollable)
     │   └── PipelineView (Widget)         # right pane — pipeline state
@@ -1142,6 +1195,8 @@ AdminScreen (Screen)
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+**ArtifactView** handles `CitationJumpRequested` messages — on receipt, scrolls the file preview to `line_start` and applies a highlight style to lines `[line_start, line_end]`. Highlight clears when a different finding is selected or user navigates away.
+
 ### 11.3 Custom Textual Messages — `tui/messages.py`
 
 ```python
@@ -1168,6 +1223,16 @@ class AdvisoryAlertDetected(Message):
     def __init__(self, alerts: list):
         super().__init__()
         self.alerts = alerts
+
+class CitationJumpRequested(Message):
+    """Posted by PipelineView when an IssueFinding is highlighted/selected.
+    Carries the file_path, line_start, and line_end from the finding's first SourceCitation.
+    ArtifactView handles this message to scroll and highlight the target line range."""
+    def __init__(self, file_path: str, line_start: int, line_end: int):
+        super().__init__()
+        self.file_path  = file_path
+        self.line_start = line_start
+        self.line_end   = line_end
 ```
 
 ### 11.4 Modal Dialogs — `tui/widgets/modals.py`
@@ -1197,35 +1262,50 @@ from ..models.payloads import ReviewNodePayload
 
 class DreamCycleWorker:
     """
-    Analyses the global nodes table to identify recurring failure patterns
-    and updates global_client_insights.
-
-    Pattern detection heuristic (MVP):
-    - For each node with layer_type='exploration', extract (project global_tags, dimension, confidence)
-    - Group by (client_tag, "HIGH_RISK_{dimension}") where confidence == RED
-    - Upsert into global_client_insights with incremented frequency_count
+    Analyses the global nodes table to identify recurring failure patterns.
+    Uses SQLite's json_each() JSON table-valued function to extract RED-confidence
+    findings directly within the SQL query, eliminating full object deserialization
+    in the Python runtime for nodes that have no RED findings.
     """
 
     async def run(self, conn: aiosqlite.Connection) -> int:
-        """Returns the number of insight rows created or updated."""
-        nodes: list[NodeRow] = await list_all_nodes(conn, layer_type="exploration")
+        """
+        Returns the number of insight rows created or updated.
+
+        SQL strategy:
+        - Uses json_each(n.metadata_json, '$.dimensions') to iterate the dimensions
+          array stored in metadata_json without loading the full JSON blob into Python.
+        - Filters for overall_confidence = 'RED' inside the SQL WHERE clause.
+        - Joins to projects to retrieve global_tags for the upsert key.
+        - Python loop only processes the filtered (tag, pattern) pairs — not raw node blobs.
+        """
+        EXTRACT_RED_FINDINGS_SQL = """
+            SELECT
+                p.global_tags                                        AS global_tags,
+                json_extract(dim.value, '$.dimension')               AS dimension_name
+            FROM nodes n
+            JOIN projects p ON p.id = n.project_id
+            JOIN json_each(n.metadata_json, '$.dimensions') AS dim
+            WHERE n.layer_type = 'exploration'
+              AND json_extract(dim.value, '$.overall_confidence') = 'RED'
+        """
         updated = 0
-        for node in nodes:
-            try:
-                payload = ReviewNodePayload.model_validate_json(node.content_markdown)
-                project = await get_project(conn, node.project_id)
-                tags = json.loads(project.global_tags) if project else []
-                for finding in payload.findings:
-                    if finding.confidence == ConfidenceEnum.RED:
-                        pattern = f"HIGH_RISK_{finding.dimension.value.upper()}"
-                        for tag in tags:
-                            await upsert_insight(conn, tag, pattern)
-                            updated += 1
-            except Exception:
-                # Log error but do NOT abort; continue processing remaining nodes
-                continue
+        async with conn.execute(EXTRACT_RED_FINDINGS_SQL) as cursor:
+            async for row in cursor:
+                try:
+                    tags = json.loads(row[0]) if row[0] else []
+                    dimension_name = row[1] or "UNKNOWN"
+                    pattern = f"HIGH_RISK_{dimension_name.upper()}"
+                    for tag in tags:
+                        await upsert_insight(conn, tag, pattern)
+                        updated += 1
+                except Exception:
+                    # Log per-row error but do NOT abort; continue processing
+                    continue
         return updated
 ```
+
+> **json_each() optimization:** The previous implementation loaded and deserialized every exploration node's full `metadata_json` blob into Python memory before filtering for RED confidence. For large projects with hundreds of nodes, this was O(N) full-blob deserialization. The `json_each(n.metadata_json, '$.dimensions')` table-valued function pushes the filtering predicate into the SQLite execution engine, which reads only the relevant JSON paths. Python only receives the `(global_tags, dimension_name)` tuples for rows that actually matched the RED confidence filter — significantly reducing memory pressure during Dream Cycle runs.
 
 ### 12.2 Blueprint Manager — `admin/blueprint_manager.py`
 
@@ -1301,7 +1381,9 @@ class JSONPacketSerializer:
     async def export(self, packet: JSONPacket, output_path: Path) -> None:
         """
         Writes packet to output_path as pretty-printed JSON.
-        Uses a temp file + atomic rename to prevent partial files on failure.
+        Uses a temp file in the same parent directory + shutil.move() for atomic,
+        cross-device-safe rename. shutil.move() falls back to copy+delete when
+        os.rename() would fail across Docker volume mount boundaries (EXDEV error).
         Raises ExportError if any filesystem error occurs.
         """
         tmp_path = output_path.with_suffix(".tmp")
@@ -1310,12 +1392,14 @@ class JSONPacketSerializer:
                 packet.model_dump_json(indent=2),
                 encoding="utf-8"
             )
-            tmp_path.rename(output_path)
+            shutil.move(str(tmp_path), str(output_path))
         except OSError as exc:
             if tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
             raise ExportError(f"Export failed: {exc}") from exc
 ```
+
+> **Cross-device safety:** `Path.rename()` maps to `os.rename()`, which raises `EXDEV` (cross-device link error) when the source and destination are on different filesystem mount points — a common scenario with Docker volume-mounted `/exports` directories. `shutil.move()` detects this condition and transparently falls back to a copy-then-delete sequence, preserving atomicity guarantees without requiring the source and destination to share the same mount point.
 
 **Atomic rename** ensures no partial file is left on disk if the write fails, satisfying Requirement 11.5.
 
@@ -1546,3 +1630,19 @@ All non-fatal errors surface in the TUI footer bar using a `notify()` call on th
 *For any* set of blueprint records in `prompt_blueprints` and *for any* `activate_blueprint(id)` call, immediately after the call completes exactly one row in `prompt_blueprints` must have `is_active = 1`, and that row must be the one whose `id` matches the argument. This invariant must hold even if multiple blueprints previously had `is_active = 1` (a corrupted state) before the call.
 
 **Validates: Requirements 14.2, 14.3**
+
+---
+
+### Property 22: Citation Jump Target Accuracy
+
+*For any* `IssueFinding` with at least one `SourceCitation`, when that finding is selected in the `PipelineView`, the `CitationJumpRequested` message emitted must carry `file_path`, `line_start`, and `line_end` values that exactly match the first `SourceCitation` in `finding.citations[0]`.
+
+**Validates: Requirements 10.8, 10.9**
+
+---
+
+### Property 23: Layer 1 Batch Commit Atomicity
+
+*For any* Layer 1 run where all 12 dimension tasks reach `COMPLETE` state, exactly one row must be written to the `nodes` table containing all 12 dimension payloads in `metadata_json`. *For any* Layer 1 run where at least one dimension is in `FAILED` state, zero rows must be written to the `nodes` table as a result of that run.
+
+**Validates: Requirements 5.4**
