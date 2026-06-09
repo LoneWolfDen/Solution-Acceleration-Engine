@@ -35,6 +35,7 @@ The system runs as a single-container Docker deployment, operates fully offline-
 - **Global Client Insights**: Aggregated pattern data stored in `global_client_insights`, surfaced as advisory hints in the TUI sidebar.
 - **JSON Packet**: A flat, structured JSON export of the full pipeline state for a given node.
 - **Temperature-Zero Mode**: LLM inference configuration enforcing `temperature=0.0` and JSON-mode output to ensure deterministic responses.
+- **CitationJumpRequested**: A custom Textual Message emitted by the PipelineView when an IssueFinding is selected, carrying the file_path, line_start, and line_end of the first SourceCitation in that finding.
 
 ---
 
@@ -189,6 +190,8 @@ The system runs as a single-container Docker deployment, operates fully offline-
 5. WHEN a footer action key is pressed, THE TUI SHALL respond within 200ms with either an immediate action or a modal requiring user input.
 6. THE TUI SHALL be keyboard-navigable without requiring a mouse.
 7. WHERE a project contains multiple Nodes, THE TUI SHALL allow the user to switch between Nodes using keyboard navigation within the Active Pipeline pane.
+8. WHEN an IssueFinding is highlighted or selected in the Active Pipeline pane, THE TUI SHALL emit a `CitationJumpRequested` message carrying the `file_path`, `line_start`, and `line_end` from the finding's first SourceCitation.
+9. WHEN a `CitationJumpRequested` message is received by the ArtifactView, THE ArtifactView SHALL scroll the file content preview to bring `line_start` into view and SHALL visually highlight all lines in the range `[line_start, line_end]` using a distinct highlight style until a different finding is selected or the user navigates away.
 
 ---
 
