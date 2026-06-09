@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "contexta"
 version = "0.1.0"
 description = "Project Contexta — deterministic solution validation pipeline"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.9"
 dependencies = [
     "textual>=0.47.0",
     "pydantic>=2.5.0",
@@ -28,6 +28,9 @@ dev = [
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "--tb=short"
+
+[project.scripts]
+contexta = "contexta.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["contexta"]
