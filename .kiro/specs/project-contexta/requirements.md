@@ -36,6 +36,7 @@ The system runs as a single-container Docker deployment, operates fully offline-
 - **JSON Packet**: A flat, structured JSON export of the full pipeline state for a given node.
 - **Temperature-Zero Mode**: LLM inference configuration enforcing `temperature=0.0` and JSON-mode output to ensure deterministic responses.
 - **CitationJumpRequested**: A custom Textual Message emitted by the PipelineView when an IssueFinding is selected, carrying the file_path, line_start, and line_end of the first SourceCitation in that finding.
+- **Execution Mode**: A configuration toggle (`UNIFIED` or `PARALLEL`). `UNIFIED` evaluates all 12 dimensions in a single LLM call and parses the response into 12 independent `ReviewNodePayload` objects to save tokens; `PARALLEL` runs 12 independent async calls concurrently. Defaults to `UNIFIED`.
 
 ---
 
@@ -50,7 +51,7 @@ The system runs as a single-container Docker deployment, operates fully offline-
 1. THE Contexta SHALL be packaged as a single Docker container image that runs entirely offline once the image is built.
 2. THE Contexta SHALL require Python 3.11 or later as its runtime baseline.
 3. WHEN the container starts, THE Contexta SHALL launch the Textual TUI without requiring any manual pre-configuration beyond environment variable injection.
-4. THE Contexta SHALL expose LLM backend selection via an environment variable accepting any LiteLLM-supported backend identifier (e.g., `ollama/mistral`, `openai/gpt-4o`, `anthropic/claude-3`).
+4. THE Contexta SHALL expose LLM backend selection via an environment variable accepting any LiteLLM-supported backend identifier (e.g., `ollama/mistral`, `openai/gpt-4o`, `anthropic/claude-3`), AND SHALL expose a `CONTEXTA_EXECUTION_MODE` environment variable defaulting to `UNIFIED`.
 5. IF a required environment variable is missing at startup, THEN THE Contexta SHALL display a descriptive error message in the TUI and halt initialisation.
 
 ---
@@ -63,7 +64,7 @@ The system runs as a single-container Docker deployment, operates fully offline-
 
 1. THE Contexta SHALL initialise a SQLite database with the following tables on first run: `projects`, `nodes`, `prompt_blueprints`, `global_client_insights`.
 2. THE `projects` table SHALL store columns: `id` (primary key), `name` (text), `global_tags` (JSON text).
-3. THE `nodes` table SHALL store columns: `id` (primary key), `project_id` (foreign key → projects.id), `parent_id` (nullable foreign key → nodes.id), `layer_type` (text), `node_name` (text), `metadata_json` (JSON text), `content_markdown` (text), `created_at` (ISO-8601 timestamp).
+3. THE `nodes` table SHALL store columns: `id` (primary key), `project_id` (foreign key → projects.id), `parent_id` (nullable foreign key → nodes.id), `layer_type` (text), `node_name` (text), `version_tag` (text), `metadata_json` (JSON text), `content_markdown` (text), `created_at` (ISO-8601 timestamp).
 4. THE `prompt_blueprints` table SHALL store columns: `id` (primary key), `blueprint_name` (text), `version_string` (text), `master_prompt_text` (text), `is_active` (boolean).
 5. THE `global_client_insights` table SHALL store columns: `id` (primary key), `client_or_industry_tag` (text), `observed_pattern` (text), `frequency_count` (integer), `last_updated` (ISO-8601 timestamp), with a unique index on `(client_or_industry_tag, observed_pattern)`.
 6. WHEN a Node is written to the `nodes` table, THE Contexta SHALL validate the node payload against the `ReviewNodePayload` Pydantic model before committing.
@@ -110,10 +111,10 @@ The system runs as a single-container Docker deployment, operates fully offline-
 
 #### Acceptance Criteria
 
-1. WHEN a Layer 1 review is initiated, THE Contexta SHALL launch exactly 12 concurrent asynchronous dimension review tasks, one per ReviewDimension.
+1. WHEN a Layer 1 review is initiated AND `CONTEXTA_EXECUTION_MODE` is `PARALLEL`, THE Contexta SHALL launch exactly 12 concurrent asynchronous dimension review tasks, one per ReviewDimension. IF `CONTEXTA_EXECUTION_MODE` is `UNIFIED`, THE Contexta SHALL launch a single LLM task that returns a consolidated JSON array of 12 dimension results, which is then parsed and validated into 12 independent `ReviewNodePayload` objects.
 2. THE Contexta SHALL execute all LLM calls for dimension reviews with `temperature=0.0` and JSON-mode output enforced.
 3. THE Contexta SHALL use the active Prompt Blueprint from `prompt_blueprints` (where `is_active = true`) to construct the LLM prompt for each dimension review.
-4. WHEN a dimension review task completes successfully, THE Contexta SHALL store the resulting `ReviewNodePayload` in the `nodes` table linked to the current project and node.
+4. WHEN all 12 dimension payloads are successfully validated — whether generated concurrently via `PARALLEL` mode or parsed from a single unified LLM response in `UNIFIED` mode — THE Contexta SHALL commit all 12 payloads in a single atomic write to the `nodes` table to prevent partial Layer 1 records.
 5. THE Active Pipeline pane SHALL display a live status indicator for each of the 12 dimensions, reflecting one of the following states: `PENDING`, `RUNNING`, `COMPLETE`, `FAILED`.
 6. WHEN a dimension review task is in `FAILED` state, THE Contexta SHALL allow the user to independently restart that specific dimension task without restarting the remaining 11 tasks.
 7. WHILE a dimension review task is in `RUNNING` state, THE Active Pipeline pane SHALL display a progress indicator for that dimension.
@@ -173,7 +174,7 @@ The system runs as a single-container Docker deployment, operates fully offline-
 2. THE routing toggle SHALL offer exactly three options: `[Change Scope]`, `[Route to Risk Register]`, `[Route to Assumptions Matrix]`.
 3. WHEN the user selects `[Route to Risk Register]`, THE Contexta SHALL update the finding's `mitigation_routing` to `Risk Register` and record the decision in the active Node's `metadata_json`.
 4. WHEN the user selects `[Route to Assumptions Matrix]`, THE Contexta SHALL update the finding's `mitigation_routing` to `Assumptions Matrix` and record the decision in the active Node's `metadata_json`.
-5. WHEN the user selects `[Change Scope]`, THE Contexta SHALL display a confirmation modal requiring explicit acknowledgement that a scope change has been approved before updating the finding's `mitigation_routing` to `Scope Modification` in `metadata_json`.
+5. WHEN the user selects `[Change Scope]`, THE Contexta SHALL display a confirmation modal requiring explicit acknowledgement that a scope change has been approved before updating the finding's `mitigation_routing` to `Scope Modification` in `metadata_json`. THE Contexta SHALL then append a `#MUTATED` tag to the active Node's `global_tags` in the `metadata_json` and SHALL display a TUI notification advising the user to re-run the Exploration Layer, as the original artifact context is now out of sync with the modified scope.
 
 ---
 
