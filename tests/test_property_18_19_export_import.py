@@ -72,14 +72,14 @@ def _make_full_packet() -> JSONPacket:
     payloads = [_make_payload(dim) for dim in ReviewDimensionEnum]
     return JSONPacket(
         schema_version=EXPORT_SCHEMA_VERSION,
-        export_timestamp=now,
+        project_id="project-test-001",
         project_name="Test Project",
-        project_global_tags=["#Lean-Client"],
+        global_tags=["#Lean-Client"],
         node_id="node-test-001",
         node_name="Draft v1",
         parent_node_id=None,
         layer_type="exploration",
-        dimension_payloads=payloads,
+        payloads=payloads,
         arbitrator_result=ExportArbitratorResult(
             contradictions=[{"dimension_a": "Risk", "dimension_b": "Timeline", "description": "Conflict"}],
             raw_llm_response='{"contradictions": []}',
@@ -139,10 +139,10 @@ class TestProperty18ExportImportRoundTrip:
         await serializer.export(packet, out_file)
 
         raw = json.loads(out_file.read_text())
-        assert len(raw["dimension_payloads"]) == 12
+        assert len(raw["payloads"]) == 12
 
         # Re-validate each payload against the Pydantic model
-        for payload_dict in raw["dimension_payloads"]:
+        for payload_dict in raw["payloads"]:
             p = ReviewNodePayload.model_validate(payload_dict)
             assert p.dimension in ReviewDimensionEnum
 
@@ -182,7 +182,7 @@ class TestProperty18ExportImportRoundTrip:
 
         raw = json.loads(out_file.read_text())
         assert raw["project_name"] == packet.project_name
-        assert raw["project_global_tags"] == packet.project_global_tags
+        assert raw["global_tags"] == packet.global_tags
         assert raw["node_name"] == packet.node_name
         assert raw["layer_type"] == packet.layer_type
 
@@ -227,14 +227,14 @@ class TestProperty19ImportValidationNoPartialWrite:
         now = datetime.now(timezone.utc).isoformat()
         bad_data = {
             "schema_version": "1.0",
-            "export_timestamp": now,
+            "project_id": "project-bad-001",
             "project_name": "P",
-            "project_global_tags": [],
+            "global_tags": [],
             "node_id": "n1",
             "node_name": "N",
             "parent_node_id": None,
             "layer_type": "exploration",
-            "dimension_payloads": [
+            "payloads": [
                 {
                     "dimension": "NONEXISTENT_DIMENSION",  # invalid enum
                     "findings": [],
