@@ -24,6 +24,9 @@ dev = [
     "pytest-cov>=4.1.0",
 ]
 
+[project.scripts]
+contexta = "contexta.__main__:run"
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
@@ -31,3 +34,11 @@ addopts = "--tb=short"
 
 [tool.hatch.build.targets.wheel]
 packages = ["contexta"]
+
+[tool.coverage.run]
+source = ["contexta"]
+omit = ["contexta/__main__.py", "contexta/tui/*"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 90
