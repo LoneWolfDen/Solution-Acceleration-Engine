@@ -158,7 +158,10 @@ class ArtifactView(Widget):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """User selected a file in the browser — render its preview."""
+<<<<<<< feat/final-sprint-e2e-integration
+=======
         # The ListItem id encodes the file path; resolve back to path.
+>>>>>>> main
         if event.item.id is None:
             return
         # Find the matching artifact by id.
