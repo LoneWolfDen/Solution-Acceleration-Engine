@@ -392,14 +392,14 @@ class TestE2EExportImportDreamCycle:
         now = datetime.now(timezone.utc).isoformat()
         packet = JSONPacket(
             schema_version=EXPORT_SCHEMA_VERSION,
-            export_timestamp=now,
+            project_id=project.id,
             project_name=project.name,
-            project_global_tags=project.global_tags,
+            global_tags=project.global_tags,
             node_id=str(uuid.uuid4()),
             node_name="E2E Node",
             parent_node_id=None,
             layer_type="exploration",
-            dimension_payloads=all_payloads,
+            payloads=all_payloads,
             arbitrator_result=None,
             routing_decisions=[],
             metadata={},
