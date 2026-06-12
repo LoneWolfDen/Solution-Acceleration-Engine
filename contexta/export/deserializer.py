@@ -87,24 +87,23 @@ class JSONPacketDeserializer:
             ) from exc
 
         # Step 3 — ensure project exists
-        project = await get_project(conn, packet.node_id)
+        project = await get_project(conn, packet.project_id)
         if project is None:
-            # Use node_id as project_id for imported packets (idempotent)
             project = await create_project(
                 conn,
                 name=packet.project_name,
-                global_tags=packet.project_global_tags,
+                global_tags=packet.global_tags,
             )
 
         # Step 4 — build representative payload and metadata, then write node
-        dimension_payloads = packet.dimension_payloads
-        if not dimension_payloads:
+        payloads = packet.payloads
+        if not payloads:
             raise ImportValidationError(
-                "JSONPacket contains no dimension_payloads; cannot import."
+                "JSONPacket contains no payloads; cannot import."
             )
 
         metadata: dict = {
-            "dimensions": [p.model_dump() for p in dimension_payloads],
+            "dimensions": [p.model_dump() for p in payloads],
             "routing_decisions": packet.routing_decisions,
             "imported_from": str(file_path),
             "schema_version": packet.schema_version,
@@ -119,7 +118,8 @@ class JSONPacketDeserializer:
             parent_id=packet.parent_node_id,
             layer_type=packet.layer_type,
             node_name=packet.node_name,
-            payload=dimension_payloads[0],
+            payload=payloads[0],
             metadata=metadata,
+            version_tag=packet.version_tag,
         )
         return node_row
