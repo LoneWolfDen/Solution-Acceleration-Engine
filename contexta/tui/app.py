@@ -2,7 +2,11 @@
 
 Responsibilities
 ----------------
+<<<<<<< feat/final-sprint-e2e-integration
+- Holds the single ``aiosqlite.Connection``, ``ContextaConfig``,
+=======
 - Holds the single ``aiosqlite.Connection`` (DatabaseContext), ``ContextaConfig``,
+>>>>>>> main
   ``ArtifactRegistry``, and ``PromptBlueprintManager``.
 - Registers ``MainScreen`` as the default screen and ``AdminScreen`` as a named
   screen accessible via ``push_screen("admin")``.
@@ -28,6 +32,10 @@ if TYPE_CHECKING:
     # Only imported for type hints; optional at runtime so that the TUI can
     # be launched in environments where the full pipeline is not yet wired.
     import aiosqlite
+<<<<<<< feat/final-sprint-e2e-integration
+    from contexta.config import ContextaConfig
+=======
+>>>>>>> main
     from contexta.tui.widgets.pipeline_view import PipelineView
 
 
@@ -58,6 +66,10 @@ class ContextaApp(App):
         node_name: str = "—",
         export_path: str = "/exports",
         db_conn: Optional["aiosqlite.Connection"] = None,
+<<<<<<< feat/final-sprint-e2e-integration
+        config: Optional["ContextaConfig"] = None,
+=======
+>>>>>>> main
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -66,11 +78,34 @@ class ContextaApp(App):
         self.node_name: str = node_name
         self.export_path: str = export_path
         self._db_conn = db_conn
+<<<<<<< feat/final-sprint-e2e-integration
+        self._config = config
+=======
+>>>>>>> main
 
         # Orchestrator and blueprint manager are injected after construction
         # (wired by __main__.py after async DB init).
         self._orchestrator = None
         self._blueprint_manager = None
+<<<<<<< feat/final-sprint-e2e-integration
+        self._llm_config = None
+
+        # Wire up blueprint manager and LLM config eagerly if prerequisites
+        # are available — avoids the need for post-construction injection in
+        # the common startup path.
+        if db_conn is not None:
+            from contexta.admin.blueprint_manager import PromptBlueprintManager
+            self._blueprint_manager = PromptBlueprintManager(db_conn)
+
+        if config is not None:
+            from contexta.llm.provider import LLMConfig
+            self._llm_config = LLMConfig(
+                model=config.llm_backend,
+                api_key=config.llm_api_key,
+                base_url=config.llm_base_url,
+            )
+=======
+>>>>>>> main
 
     # ── Compose / mount ───────────────────────────────────────────────────────
 
