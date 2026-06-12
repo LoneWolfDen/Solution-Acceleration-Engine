@@ -25,15 +25,9 @@ if TYPE_CHECKING:
 
 
 # ── TaskState enum ────────────────────────────────────────────────────────────
-<<<<<<< feat/final-sprint-e2e-integration
 # Defined here so the TUI layer has no dependency on the pipeline layer.
 # When pipeline.dimension_runner ships it re-exports TaskState from here,
 # keeping the canonical definition in one place.
-=======
-# Defined here so the TUI layer has no dependency on the (not-yet-implemented)
-# pipeline.dimension_runner module.  When that module ships it will re-export
-# TaskState from this location, keeping the canonical definition in one place.
->>>>>>> main
 
 
 class TaskState(str, Enum):

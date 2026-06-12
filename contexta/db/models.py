@@ -37,7 +37,7 @@ class NodeRow:
     parent_id:        Optional[str]
     layer_type:       str
     node_name:        str
-    metadata_json:    Dict[str, Any]    # deserialised from JSON
+    metadata_json:    Any                # raw JSON string (from DB reads) or dict (from direct construction)
     content_markdown: str               # raw JSON string from LLM / payload
     created_at:       str               # ISO-8601 UTC
     version_tag:      Optional[str] = None
