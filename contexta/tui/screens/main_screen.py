@@ -1,310 +1,178 @@
-"""MainScreen — primary TUI layout.
+"""MainScreen — master layout screen.
 
-Header (project / node / admin indicator)
-Left pane  (30%): ArtifactView
-Right pane (70%): PipelineView
-Footer: [F] Fork  [C] Compare  [P] Proposal  [E] Export
+Combines:
+- ContextaHeader  (persistent header)
+- Horizontal split: ArtifactView (30%) + PipelineView (70%)
+- ContextaFooter  (persistent footer with [F] [C] [P] [E] bindings)
+
+All footer key handlers are registered as BINDINGS so Textual dispatches
+them through its priority system, guaranteeing a sub-200ms response even on
+slow terminals (no polling, pure event-driven).
+
+The CitationJumpRequested message bubbles upward from PipelineView through
+this screen.  MainScreen does NOT intercept it — it continues bubbling to
+ArtifactView which handles it via ``on_citation_jump_requested``.  Both
+widgets are peers inside the Horizontal container, so the message reaches
+the App, then re-dispatches down the DOM to ArtifactView.
+
+Layout
+------
+┌─────────────────────────────────────────────────────────────────┐
+│  HEADER: [Project: {name}]  [Node: {name}]          [⚙ Admin]  │
+├──────────────────────┬──────────────────────────────────────────┤
+│  MCP Artifact View   │  Active Pipeline                         │
+│  (left pane, 30%)    │  (right pane, 70%)                       │
+│                      │  Metadata Cluster                         │
+│  ► file_a.md  (120L) │  ┌ 12 × DimensionRow ─────────────────┐ │
+│    file_b.docx (45L) │  │ Intent     ○ PENDING               │ │
+│    file_c.pdf  (89L) │  │ Scope      ● RUNNING [━━━━━━━━━━]  │ │
+│  [preview panel]     │  │ …                                   │ │
+│  ...file content...  │  └────────────────────────────────────┘ │
+│                      │  Reconciliation Panel (post Layer 2)     │
+├──────────────────────┴──────────────────────────────────────────┤
+│  FOOTER: [F] Fork  [C] Compare  [P] Proposal  [E] Export       │
+└─────────────────────────────────────────────────────────────────┘
 """
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
-from pathlib import Path
+from typing import List, Optional
 
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.screen import Screen
-from textual.widgets import Footer, Header
+from textual.widgets import Footer, Header, Static
 
-from ...admin.blueprint_manager import PromptBlueprintManager
-from ...db.repositories import fork_node
-from ...export.serializer import ExportError, JSONPacketSerializer
-from ...llm.prompts import PromptBuilder
-from ...llm.provider import LLMConfig
-from ...mcp.artifact_registry import ArtifactRegistry
-from ...models.export import EXPORT_SCHEMA_VERSION, ExportArbitratorResult, JSONPacket
-from ...models.payloads import ReviewNodePayload
-from ...pipeline.arbitrator import ArbitratorEngine, ArbitratorError
-from ...pipeline.advisor import ProactiveAdvisor
-from ...pipeline.dimension_runner import (
-    TaskOrchestrator,
-    TaskState,
-    commit_exploration_node,
-    make_dimension_runner,
-)
-from ...pipeline.scope_policy import ScopePolicyEnforcer
-from ..messages import (
-    AdvisoryAlertDetected,
-    ArtifactIngested,
-    CitationJumpRequested,
-    DimensionStateChanged,
-)
-from ..widgets.artifact_view import ArtifactView
-from ..widgets.modals import (
+from contexta.tui.widgets.artifact_view import ArtifactView
+from contexta.tui.widgets.modals import (
     BlueprintErrorModal,
     CompareBlockingModal,
     ExportConfirmModal,
     ForkNameModal,
     RiskBlockingModal,
 )
-from ..widgets.pipeline_view import PipelineView
+from contexta.tui.widgets.pipeline_view import PipelineView
 
 
 class MainScreen(Screen):
-    """Primary application screen.
-
-    Wires the ingest controls, pipeline triggers, and footer key bindings to
-    the underlying backend services.
-    """
+    """The primary application screen."""
 
     BINDINGS = [
-        Binding("f", "fork", "[F] Fork Iteration", show=True),
-        Binding("c", "compare", "[C] Compare", show=True),
-        Binding("p", "proposal", "[P] Run Proposal Generator", show=True),
-        Binding("e", "export", "[E] Export Flat JSON Packet", show=True),
-        Binding("a", "admin", "⚙ Admin", show=True),
+        Binding("f", "fork",     "[F] Fork Iteration",        show=True,  priority=True),
+        Binding("c", "compare",  "[C] Compare",                show=True,  priority=True),
+        Binding("p", "proposal", "[P] Run Proposal Generator", show=True,  priority=True),
+        Binding("e", "export",   "[E] Export Flat JSON Packet", show=True, priority=True),
+        Binding("a", "admin",    "[⚙] Admin Tab",              show=True,  priority=True),
     ]
+
+    DEFAULT_CSS = """
+    MainScreen {
+        layout: vertical;
+    }
+
+    #main-split {
+        height: 1fr;
+        layout: horizontal;
+    }
+    """
 
     def __init__(
         self,
-        registry: ArtifactRegistry,
-        llm_config: LLMConfig,
-        blueprint_manager: PromptBlueprintManager,
-        export_path: str = "/exports",
-        project_name: str = "New Project",
-        node_name: str = "Draft v1",
-        global_tags: list | None = None,
+        project_name: str = "Untitled Project",
+        node_name: str = "—",
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self._registry = registry
-        self._llm_config = llm_config
-        self._blueprint_manager = blueprint_manager
-        self._export_path = export_path
         self._project_name = project_name
         self._node_name = node_name
-        self._global_tags: list = global_tags or []
 
-        self._orchestrator: TaskOrchestrator | None = None
-        self._current_project_id: str | None = None
-        self._current_node_id: str | None = None
-        self._arbitrator_result = None
-
-    # ── Layout ────────────────────────────────────────────────────────────────
+    # ── Compose ──────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        with Horizontal():
-            yield ArtifactView(self._registry, id="artifact-view")
-            yield PipelineView(
-                project_name=self._project_name,
-                node_name=self._node_name,
-                global_tags=self._global_tags,
-                id="pipeline-view",
-            )
+        with Horizontal(id="main-split"):
+            yield ArtifactView(id="artifact-view")
+            yield PipelineView(id="pipeline-view")
         yield Footer()
 
-    # ── Pipeline launch ───────────────────────────────────────────────────────
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    async def launch_pipeline(
-        self,
-        project_id: str,
-        node_id: str | None = None,
-    ) -> None:
-        """Wire the registry + LLM config into a TaskOrchestrator and launch all 12 tasks."""
-        self._current_project_id = project_id
-        self._current_node_id = node_id
-
-        blueprint = await self._blueprint_manager.get_active()
-        if blueprint is None:
-            await self.app.push_screen(BlueprintErrorModal())
-            return
-
-        if not self._registry.all():
-            self.app.notify("⚠ No source files ingested. Ingest files before running.", timeout=5)
-            return
-
-        schema_json = ReviewNodePayload.model_json_schema().__str__()
-        builder = PromptBuilder(blueprint=blueprint, schema_json=schema_json)
-
-        runner_fn = make_dimension_runner(
-            config=self._llm_config,
-            builder=builder,
-            registry=self._registry,
-        )
-
-        async def _on_state_change(task) -> None:
-            self.post_message(
-                DimensionStateChanged(
-                    dimension=task.dimension,
-                    state=task.state,
-                    error=task.error_message,
-                )
-            )
-
-        self._orchestrator = TaskOrchestrator(
-            on_state_change=_on_state_change,
-            runner_fn=runner_fn,
-        )
-
-        self.app.notify("▶ Layer 1 exploration started across all 12 dimensions…")
-        await self._orchestrator.launch_all()
-
-        if self._orchestrator.all_complete():
-            # Batch-commit to DB
-            conn = getattr(self.app, "db", None)
-            if conn is not None:
-                await commit_exploration_node(
-                    self._orchestrator,
-                    conn,
-                    project_id=project_id,
-                    node_name=self._node_name,
-                    parent_id=node_id,
-                )
-            self.app.notify("✅ Layer 1 complete — all 12 dimensions reviewed.")
-        else:
-            incomplete = self._orchestrator.incomplete_dimensions()
-            self.app.notify(
-                f"⚠ {len(incomplete)} dimension(s) failed. Use Retry to rerun.",
-                timeout=8,
-            )
-
-    # ── Footer key bindings ───────────────────────────────────────────────────
-
-    async def action_fork(self) -> None:
-        """[F] Open fork name modal then create the new node."""
-
-        def _on_name(name: str | None) -> None:
-            if name:
-                self.run_worker(self._do_fork(name), exclusive=False)
-
-        await self.app.push_screen(ForkNameModal(), _on_name)
-
-    async def _do_fork(self, name: str) -> None:
-        conn = getattr(self.app, "db", None)
-        if conn is None or self._current_node_id is None:
-            self.app.notify("⚠ No active node to fork from.", timeout=4)
-            return
-        try:
-            new_node = await fork_node(conn, self._current_node_id, name)
-            self._current_node_id = new_node.id
-            self._node_name = name
-            pv = self.query_one("#pipeline-view", PipelineView)
-            pv.update_node_info(self._project_name, name)
-            self.app.notify(f"🔀 Forked to node: {name!r}")
-        except Exception as exc:
-            self.app.notify(f"❌ Fork failed: {exc}", timeout=6)
-
-    async def action_compare(self) -> None:
-        """[C] Run the Layer 2 Arbitrator synthesis."""
-        if self._orchestrator is None:
-            self.app.notify("⚠ Run Layer 1 first.", timeout=4)
-            return
-
-        if not self._orchestrator.all_complete():
-            incomplete = [d.value for d in self._orchestrator.incomplete_dimensions()]
-            await self.app.push_screen(CompareBlockingModal(incomplete))
-            return
-
-        # Proactive Advisor check
-        conn = getattr(self.app, "db", None)
-        if conn is not None:
-            advisor = ProactiveAdvisor()
-            alerts = await advisor.evaluate(self._global_tags, conn)
-            if alerts:
-
-                def _on_ack(acked: bool) -> None:
-                    if acked:
-                        self.run_worker(self._run_arbitrator(), exclusive=True)
-
-                await self.app.push_screen(RiskBlockingModal(alerts), _on_ack)
-                return
-
-        await self._run_arbitrator()
-
-    async def _run_arbitrator(self) -> None:
-        blueprint = await self._blueprint_manager.get_active()
-        if blueprint is None:
-            await self.app.push_screen(BlueprintErrorModal())
-            return
-
-        schema_json = ReviewNodePayload.model_json_schema().__str__()
-        builder = PromptBuilder(blueprint=blueprint, schema_json=schema_json)
-        engine = ArbitratorEngine(config=self._llm_config, builder=builder)
-
-        try:
-            payloads = self._orchestrator.get_all_payloads()  # type: ignore[union-attr]
-            result = await engine.run(payloads)
-            self._arbitrator_result = result
-            pv = self.query_one("#pipeline-view", PipelineView)
-            pv.show_reconciliation(result.contradictions)
-            self.app.notify("✅ Layer 2 synthesis complete.")
-        except ArbitratorError as exc:
-            self.app.notify(f"❌ Arbitrator error: {exc}", timeout=8)
-
-    async def action_proposal(self) -> None:
-        """[P] Proposal Generator — stub (out of MVP scope)."""
-        self.app.notify("ℹ Proposal Generator not yet implemented.", timeout=4)
-
-    async def action_export(self) -> None:
-        """[E] Open export path modal then serialise the active node."""
-        default = str(
-            Path(self._export_path) / f"{self._node_name.replace(' ', '_')}.json"
-        )
-
-        def _on_path(path: str | None) -> None:
-            if path:
-                self.run_worker(self._do_export(path), exclusive=False)
-
-        await self.app.push_screen(ExportConfirmModal(default_path=default), _on_path)
-
-    async def _do_export(self, path: str) -> None:
-        if self._orchestrator is None or not self._orchestrator.all_complete():
-            self.app.notify("⚠ Complete Layer 1 before exporting.", timeout=4)
-            return
-
-        payloads = self._orchestrator.get_all_payloads()
-        arb = None
-        if self._arbitrator_result is not None:
-            arb = ExportArbitratorResult(
-                contradictions=self._arbitrator_result.contradictions,
-                raw_llm_response=self._arbitrator_result.raw_llm_response,
-            )
-
-        conn = getattr(self.app, "db", None)
-        routing: list = []
-        if conn is not None and self._current_node_id is not None:
-            from ...db.repositories import get_node
-            node = await get_node(conn, self._current_node_id)
-            if node:
-                meta = json.loads(node.metadata_json)
-                routing = meta.get("routing_decisions", [])
-
-        packet = JSONPacket(
-            schema_version=EXPORT_SCHEMA_VERSION,
-            export_timestamp=datetime.now(timezone.utc).isoformat(),
+    def on_mount(self) -> None:
+        """Set initial header title and metadata cluster values."""
+        self.title = f"Contexta  ·  {self._project_name}"
+        self.sub_title = f"Node: {self._node_name}"
+        pipeline = self.query_one("#pipeline-view", PipelineView)
+        pipeline.update_metadata(
             project_name=self._project_name,
-            project_global_tags=self._global_tags,
-            node_id=self._current_node_id or "unknown",
             node_name=self._node_name,
-            parent_node_id=None,
-            layer_type="exploration",
-            dimension_payloads=payloads,
-            arbitrator_result=arb,
-            routing_decisions=routing,
-            metadata={},
-            created_at=datetime.now(timezone.utc).isoformat(),
         )
 
-        serializer = JSONPacketSerializer()
-        try:
-            await serializer.export(packet, Path(path))
-            self.app.notify(f"✅ Exported to: {path}")
-        except ExportError as exc:
-            self.app.notify(f"❌ Export failed: {exc}", timeout=8)
+    # ── Public API ────────────────────────────────────────────────────────────
 
-    async def action_admin(self) -> None:
-        """Switch to the Admin screen."""
-        await self.app.push_screen("admin")
+    @property
+    def artifact_view(self) -> ArtifactView:
+        return self.query_one("#artifact-view", ArtifactView)
+
+    @property
+    def pipeline_view(self) -> PipelineView:
+        return self.query_one("#pipeline-view", PipelineView)
+
+    def update_node_name(self, node_name: str) -> None:
+        """Update the header and metadata cluster after a fork."""
+        self._node_name = node_name
+        self.sub_title = f"Node: {node_name}"
+        self.pipeline_view.update_metadata(node_name=node_name)
+
+    # ── Footer actions ────────────────────────────────────────────────────────
+    # Each action_ method completes synchronously or opens a modal within the
+    # 200ms window mandated by Requirement 10.5.  Heavy async work (LLM calls,
+    # DB writes) is delegated via the App instance so this screen stays thin.
+
+    def action_fork(self) -> None:
+        """[F] Open the fork-name modal; on confirm delegate to the App."""
+        def _on_result(name: str | bool) -> None:
+            if isinstance(name, str) and name:
+                self.app.call_from_thread(self.app.handle_fork, name)  # type: ignore[attr-defined]
+
+        self.app.push_screen(ForkNameModal(), callback=_on_result)
+
+    def action_compare(self) -> None:
+        """[C] Check all dimensions complete; open Compare or blocking modal."""
+        self.app.handle_compare()  # type: ignore[attr-defined]
+
+    def action_proposal(self) -> None:
+        """[P] Stub — Proposal Generator is out of MVP scope."""
+        self.app.notify(
+            "Proposal Generator is not yet available in this release.",
+            title="[P] Not Implemented",
+            severity="warning",
+        )
+
+    def action_export(self) -> None:
+        """[E] Open export-path modal; on confirm delegate to the App."""
+        default = getattr(self.app, "export_path", "/exports/contexta_export.json")
+
+        def _on_result(path: str | bool) -> None:
+            if isinstance(path, str) and path:
+                self.app.handle_export(path)  # type: ignore[attr-defined]
+
+        self.app.push_screen(ExportConfirmModal(default_path=default), callback=_on_result)
+
+    def action_admin(self) -> None:
+        """[A] Switch to the Admin screen."""
+        self.app.push_screen("admin")
+
+    # ── Modal helpers (called by App) ─────────────────────────────────────────
+
+    def show_compare_blocking(self, incomplete: List[str]) -> None:
+        """Open the compare-blocking modal listing incomplete dimensions."""
+        self.app.push_screen(CompareBlockingModal(incomplete=incomplete))
+
+    def show_risk_blocking(self, alerts: list, callback) -> None:
+        """Open the risk advisory modal; ``callback`` receives True/False."""
+        self.app.push_screen(RiskBlockingModal(alerts=alerts), callback=callback)
+
+    def show_blueprint_error(self) -> None:
+        """Open the no-active-blueprint error modal."""
+        self.app.push_screen(BlueprintErrorModal())
