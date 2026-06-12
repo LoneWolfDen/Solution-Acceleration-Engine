@@ -59,11 +59,11 @@ class MainScreen(Screen):
     """The primary application screen."""
 
     BINDINGS = [
-        Binding("f", "fork",     "[F] Fork Iteration",        show=True,  priority=True),
-        Binding("c", "compare",  "[C] Compare",                show=True,  priority=True),
+        Binding("f", "fork",     "[F] Fork Iteration",       show=True,  priority=True),
+        Binding("c", "compare",  "[C] Compare",               show=True,  priority=True),
         Binding("p", "proposal", "[P] Run Proposal Generator", show=True,  priority=True),
         Binding("e", "export",   "[E] Export Flat JSON Packet", show=True, priority=True),
-        Binding("a", "admin",    "[⚙] Admin Tab",              show=True,  priority=True),
+        Binding("a", "admin",    "[⚙] Admin Tab",             show=True,  priority=True),
     ]
 
     DEFAULT_CSS = """
@@ -133,12 +133,14 @@ class MainScreen(Screen):
         """[F] Open the fork-name modal; on confirm delegate to the App."""
         def _on_result(name: str | bool) -> None:
             if isinstance(name, str) and name:
+                # Delegate to the App-level fork handler.
                 self.app.call_from_thread(self.app.handle_fork, name)  # type: ignore[attr-defined]
 
         self.app.push_screen(ForkNameModal(), callback=_on_result)
 
     def action_compare(self) -> None:
         """[C] Check all dimensions complete; open Compare or blocking modal."""
+        # Delegate completion check to the App which owns the orchestrator.
         self.app.handle_compare()  # type: ignore[attr-defined]
 
     def action_proposal(self) -> None:
