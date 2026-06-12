@@ -1,158 +1,184 @@
-"""DimensionRow widget — one per ReviewDimensionEnum value.
+"""DimensionRow — one status block per ReviewDimensionEnum value.
 
-Renders: dimension name label, status badge, progress bar (RUNNING only),
-and a Retry button (FAILED only).  Reacts to ``DimensionStateChanged``
-messages to update its display.
+Renders inside ``PipelineView``'s scrollable dimension list.  One instance is
+created for each of the 12 ``ReviewDimensionEnum`` values.
+
+Visual structure (horizontal)
+------------------------------
+┌──────────────────────────────────────────────────────────────┐
+│  [Architecture]  [● PENDING ]  [━━━━━━━━━━]  [Retry]        │
+└──────────────────────────────────────────────────────────────┘
+  ↑ dimension      ↑ status       ↑ progress     ↑ retry btn
+  Label (fixed)    Static         ProgressBar    Button
+                   (reactive)     (RUNNING only) (FAILED only)
+
+State visibility matrix
+-----------------------
+State     | badge text   | progress bar | retry button
+------    | -----------  | ------------ | ------------
+PENDING   | ○ PENDING    | hidden       | hidden
+RUNNING   | ● RUNNING    | shown        | hidden
+COMPLETE  | ✓ COMPLETE   | hidden       | hidden
+FAILED    | ✗ FAILED     | hidden       | shown
 """
 
 from __future__ import annotations
 
+from typing import Optional
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal
+from textual.widget import Widget
 from textual.widgets import Button, Label, ProgressBar, Static
 
-from ...models.enums import ReviewDimensionEnum
-from ...pipeline.dimension_runner import TaskState
-from ..messages import DimensionStateChanged
+from contexta.models.enums import ReviewDimensionEnum
+from contexta.tui.messages import DimensionStateChanged, TaskState
 
-# State → display label mapping
-_STATE_LABELS: dict[TaskState, str] = {
-    TaskState.PENDING: "PENDING",
-    TaskState.RUNNING: "RUNNING",
-    TaskState.COMPLETE: "COMPLETE",
-    TaskState.FAILED: "FAILED",
+# Maps TaskState → (display text, CSS class applied to the badge Static)
+_STATE_BADGE: dict[TaskState, tuple[str, str]] = {
+    TaskState.PENDING:  ("○ PENDING",  "badge-pending"),
+    TaskState.RUNNING:  ("● RUNNING",  "badge-running"),
+    TaskState.COMPLETE: ("✓ COMPLETE", "badge-complete"),
+    TaskState.FAILED:   ("✗ FAILED",   "badge-failed"),
 }
 
-_STATE_CLASSES: dict[TaskState, str] = {
-    TaskState.PENDING: "state-pending",
-    TaskState.RUNNING: "state-running",
-    TaskState.COMPLETE: "state-complete",
-    TaskState.FAILED: "state-failed",
-}
+_ALL_BADGE_CLASSES = {cls for _, cls in _STATE_BADGE.values()}
 
 
-class DimensionRow(Static):
-    """A single row in the pipeline status pane.
+class DimensionRow(Widget):
+    """Single-row status block for one ``ReviewDimensionEnum``.
 
-    Parameters
-    ----------
-    dimension:
-        The ``ReviewDimensionEnum`` value this row represents.
+    Reacts to ``DimensionStateChanged`` messages whose ``dimension`` matches
+    this row's dimension.  Other dimensions' messages are ignored.
     """
 
     DEFAULT_CSS = """
     DimensionRow {
-        height: auto;
+        height: 3;
+        width: 100%;
+        layout: horizontal;
+        align: left middle;
         padding: 0 1;
-        border-bottom: solid $panel;
+        border-bottom: solid $background-darken-2;
     }
-    DimensionRow Horizontal {
-        height: 1;
-    }
-    DimensionRow .dim-name {
-        width: 15;
+
+    DimensionRow .dim-label {
+        width: 14;
         color: $text;
     }
-    DimensionRow .state-badge {
-        width: 10;
+
+    DimensionRow .dim-badge {
+        width: 14;
         text-align: center;
     }
-    DimensionRow .state-pending  { color: $text-muted; }
-    DimensionRow .state-running  { color: $warning; }
-    DimensionRow .state-complete { color: $success; }
-    DimensionRow .state-failed   { color: $error; }
-    DimensionRow ProgressBar {
+
+    DimensionRow .badge-pending  { color: $text-muted; }
+    DimensionRow .badge-running  { color: $warning; }
+    DimensionRow .badge-complete { color: $success; }
+    DimensionRow .badge-failed   { color: $error; }
+
+    DimensionRow .dim-progress {
         width: 20;
     }
-    DimensionRow .retry-btn {
-        width: 8;
-        height: 1;
+
+    DimensionRow .dim-retry {
+        width: 10;
+        display: none;
     }
-    DimensionRow .error-label {
-        color: $error;
+
+    DimensionRow .dim-error {
         width: 1fr;
+        color: $error;
+        text-style: italic;
+    }
+
+    DimensionRow.-running .dim-progress {
+        display: block;
+    }
+
+    DimensionRow.-failed .dim-retry {
+        display: block;
     }
     """
 
     def __init__(self, dimension: ReviewDimensionEnum, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._dimension = dimension
-        self._state = TaskState.PENDING
-        self._error: str | None = None
+        self.dimension = dimension
+        self._state: TaskState = TaskState.PENDING
+        self._error: Optional[str] = None
 
-    @property
-    def dimension(self) -> ReviewDimensionEnum:
-        return self._dimension
+    # ── Compose ──────────────────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
-        with Horizontal():
-            yield Label(
-                self._dimension.value,
-                classes="dim-name",
-                id=f"dim-name-{self._dimension.name}",
-            )
-            yield Label(
-                _STATE_LABELS[self._state],
-                classes=f"state-badge {_STATE_CLASSES[self._state]}",
-                id=f"dim-state-{self._dimension.name}",
-            )
-            yield ProgressBar(
-                total=100,
-                show_eta=False,
-                id=f"dim-progress-{self._dimension.name}",
-            )
-            yield Button(
-                "Retry",
-                variant="warning",
-                classes="retry-btn",
-                id=f"dim-retry-{self._dimension.name}",
-            )
-            yield Label(
-                "",
-                classes="error-label",
-                id=f"dim-error-{self._dimension.name}",
-            )
+        badge_text, badge_class = _STATE_BADGE[TaskState.PENDING]
+        yield Label(self.dimension.value, classes="dim-label")
+        yield Static(badge_text, classes=f"dim-badge {badge_class}")
+        yield ProgressBar(
+            total=100,
+            show_eta=False,
+            show_percentage=False,
+            classes="dim-progress",
+        )
+        yield Button("Retry", variant="warning", classes="dim-retry")
+        yield Static("", classes="dim-error")
 
-    def on_mount(self) -> None:
-        self._sync_display()
+    # ── Public API ────────────────────────────────────────────────────────────
 
-    def update_state(self, state: TaskState, error: str | None = None) -> None:
-        """Update this row's display to reflect a new task state."""
+    def update_state(self, state: TaskState, error: Optional[str] = None) -> None:
+        """Update the row to reflect the new task state.
+
+        Called directly by ``PipelineView.update_dimension()`` and also by the
+        ``on_dimension_state_changed`` handler when the message matches.
+        """
         self._state = state
         self._error = error
-        self._sync_display()
 
-    def _sync_display(self) -> None:
-        """Reconcile all child widget visibilities and labels to ``_state``."""
-        state_label = self.query_one(f"#dim-state-{self._dimension.name}", Label)
-        progress = self.query_one(f"#dim-progress-{self._dimension.name}", ProgressBar)
-        retry_btn = self.query_one(f"#dim-retry-{self._dimension.name}", Button)
-        error_label = self.query_one(f"#dim-error-{self._dimension.name}", Label)
+        badge_text, badge_class = _STATE_BADGE[state]
 
-        state_label.update(_STATE_LABELS[self._state])
-        # Remove old state classes then add the current one
-        for cls in _STATE_CLASSES.values():
-            state_label.remove_class(cls)
-        state_label.add_class(_STATE_CLASSES[self._state])
+        # Update badge text and class.
+        badge = self.query_one(".dim-badge", Static)
+        badge.update(badge_text)
+        for cls in _ALL_BADGE_CLASSES:
+            badge.remove_class(cls)
+        badge.add_class(badge_class)
 
-        # Progress bar: visible only while RUNNING
-        progress.display = self._state == TaskState.RUNNING
-        if self._state == TaskState.RUNNING:
-            progress.advance(10)
+        # Update row-level modifier classes for CSS visibility toggles.
+        self.remove_class("-pending", "-running", "-complete", "-failed")
+        self.add_class(f"-{state.value.lower()}")
 
-        # Retry button: visible only when FAILED
-        retry_btn.display = self._state == TaskState.FAILED
+        # Animate the progress bar only while RUNNING.
+        if state == TaskState.RUNNING:
+            progress = self.query_one(".dim-progress", ProgressBar)
+            progress.update(progress=50)  # indeterminate midpoint visual
 
-        # Error label
-        if self._state == TaskState.FAILED and self._error:
-            error_label.update(f" ✗ {self._error[:60]}")
-            error_label.display = True
-        else:
-            error_label.update("")
-            error_label.display = False
+        # Show error text when FAILED.
+        error_label = self.query_one(".dim-error", Static)
+        error_label.update(error or "")
 
-    # ── Message handlers ──────────────────────────────────────────────────────
+    # ── Message handler ───────────────────────────────────────────────────────
 
-    def on_dimension_state_changed(self, message: DimensionStateChanged) -> None:
-        if message.dimension == self._dimension:
-            self.update_state(message.state, message.error)
+    def on_dimension_state_changed(self, event: DimensionStateChanged) -> None:
+        """React only to changes for this row's dimension."""
+        if event.dimension != self.dimension:
+            return
+        event.stop()
+        self.update_state(event.state, event.error)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Retry button — re-post a DimensionStateChanged(PENDING) upward.
+
+        The actual retry logic lives in ``TaskOrchestrator``; this widget only
+        signals intent by resetting the state to PENDING.  The screen wires
+        the orchestrator call.
+        """
+        event.stop()
+        # Optimistically reset display to PENDING.
+        self.update_state(TaskState.PENDING)
+        # Bubble a state change so the screen can trigger the retry.
+        self.post_message(
+            DimensionStateChanged(
+                dimension=self.dimension,
+                state=TaskState.PENDING,
+                error=None,
+            )
+        )
