@@ -6,6 +6,9 @@ Startup sequence:
 3. Construct and run ``ContextaApp``.
 
 On ``ConfigError``, prints a descriptive message and halts with exit code 1.
+
+``run()`` is the synchronous entry point registered in pyproject.toml's
+[project.scripts] table.  ``_async_main()`` contains the actual async logic.
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ import asyncio
 import sys
 
 
-async def main() -> None:
+async def _async_main() -> None:
     from .config import ConfigError, load_config
     from .db.schema import init_database
     from .tui.app import ContextaApp
@@ -22,18 +25,28 @@ async def main() -> None:
     try:
         config = load_config()
     except ConfigError as exc:
-        # Can't launch TUI yet — print to stderr and exit
         print(f"FATAL: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
     db = await init_database(config.db_path)
 
     try:
-        app = ContextaApp(config=config, db=db)
+        app = ContextaApp(
+            project_name="New Project",
+            node_name="Draft v1",
+            export_path=config.export_path,
+            db_conn=db,
+            config=config,
+        )
         await app.run_async()
     finally:
         await db.close()
 
 
+def run() -> None:
+    """Synchronous entry point for the ``contexta`` console script."""
+    asyncio.run(_async_main())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    run()
