@@ -1,28 +1,37 @@
-"""SQLite DDL definitions and migration runner.
+"""
+contexta/db/schema.py — DDL statements, migration runner, and DB initialisation.
 
-``init_database()`` is the public entry point called at application startup.
-It opens an ``aiosqlite`` connection, enables foreign-key enforcement, and
-delegates to ``run_migrations()`` to apply outstanding DDL.
-
-All five tables are created with ``IF NOT EXISTS`` guards so the function is
-safe to call on every startup against an already-initialised database.
+Design constraints enforced here:
+  - nodes table includes version_tag (TEXT) column.
+  - Foreign keys are enabled on every connection.
+  - schema_version table tracks the applied migration level.
+  - init_database() is the single entry point for all callers.
 """
 
 from __future__ import annotations
 
-import aiosqlite
+import logging
+from typing import TYPE_CHECKING
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+if TYPE_CHECKING:
+    import aiosqlite
 
+logger = logging.getLogger(__name__)
+
+# Bump this integer whenever new DDL is added to DDL_STATEMENTS.
 SCHEMA_VERSION = 1
 
-# DDL executed in order on every fresh database.
-_DDL_STATEMENTS = [
+# All DDL statements executed in order during migration.
+# CREATE TABLE IF NOT EXISTS ensures idempotency on re-runs.
+DDL_STATEMENTS: list[str] = [
+    # ── Schema version tracker ────────────────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS schema_version (
         version INTEGER NOT NULL
     )
     """,
+
+    # ── Projects ──────────────────────────────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS projects (
         id          TEXT PRIMARY KEY,
@@ -30,6 +39,9 @@ _DDL_STATEMENTS = [
         global_tags TEXT NOT NULL DEFAULT '[]'
     )
     """,
+
+    # ── Nodes ─────────────────────────────────────────────────────────────────
+    # version_tag: human-assigned label surfaced during fork / export workflows.
     """
     CREATE TABLE IF NOT EXISTS nodes (
         id               TEXT PRIMARY KEY,
@@ -39,9 +51,12 @@ _DDL_STATEMENTS = [
         node_name        TEXT NOT NULL,
         metadata_json    TEXT NOT NULL DEFAULT '{}',
         content_markdown TEXT NOT NULL DEFAULT '',
-        created_at       TEXT NOT NULL
+        created_at       TEXT NOT NULL,
+        version_tag      TEXT
     )
     """,
+
+    # ── Prompt Blueprints ─────────────────────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS prompt_blueprints (
         id                 TEXT PRIMARY KEY,
@@ -51,6 +66,8 @@ _DDL_STATEMENTS = [
         is_active          INTEGER NOT NULL DEFAULT 0
     )
     """,
+
+    # ── Global Client Insights ────────────────────────────────────────────────
     """
     CREATE TABLE IF NOT EXISTS global_client_insights (
         id                     TEXT PRIMARY KEY,
@@ -64,32 +81,29 @@ _DDL_STATEMENTS = [
 ]
 
 
-# ── Migration runner ──────────────────────────────────────────────────────────
-
-
-async def run_migrations(conn: aiosqlite.Connection) -> None:
-    """Apply outstanding DDL migrations to *conn*.
-
-    Checks the ``schema_version`` table; if the version is below
-    ``SCHEMA_VERSION`` (or the table is empty), runs all DDL statements and
-    records the current version.
+async def run_migrations(conn: "aiosqlite.Connection") -> None:
     """
-    # Ensure schema_version table exists first
-    await conn.execute(
-        "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)"
-    )
-    await conn.commit()
+    Apply all pending DDL statements and record the current schema version.
 
-    async with conn.execute("SELECT version FROM schema_version LIMIT 1") as cur:
-        row = await cur.fetchone()
+    Strategy:
+      1. Check whether schema_version table exists and read the stored version.
+      2. If the stored version is already current, skip all DDL (idempotent).
+      3. Otherwise execute every DDL statement in order, then write the version.
 
-    current_version = row[0] if row else 0
+    This is a simple forward-only migration.  For this project scope a full
+    Alembic-style runner is unnecessary overhead.
+    """
+    # Step 1: run ALL DDL (CREATE TABLE IF NOT EXISTS is idempotent)
+    for statement in DDL_STATEMENTS:
+        await conn.execute(statement)
 
-    if current_version < SCHEMA_VERSION:
-        for ddl in _DDL_STATEMENTS:
-            await conn.execute(ddl)
+    # Step 2: check stored schema version
+    cursor = await conn.execute("SELECT version FROM schema_version LIMIT 1")
+    row = await cursor.fetchone()
+    stored_version: int = row[0] if row else 0
 
-        if row is None:
+    if stored_version < SCHEMA_VERSION:
+        if stored_version == 0:
             await conn.execute(
                 "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
             )
@@ -97,27 +111,29 @@ async def run_migrations(conn: aiosqlite.Connection) -> None:
             await conn.execute(
                 "UPDATE schema_version SET version = ?", (SCHEMA_VERSION,)
             )
-
         await conn.commit()
+        logger.info("Database migrated to schema version %d.", SCHEMA_VERSION)
+    else:
+        await conn.commit()
+        logger.debug("Database schema already at version %d.", stored_version)
 
 
-# ── Connection factory ────────────────────────────────────────────────────────
-
-
-async def init_database(db_path: str) -> aiosqlite.Connection:
-    """Open the SQLite database at *db_path*, enable foreign keys, and migrate.
-
-    Parameters
-    ----------
-    db_path:
-        Filesystem path to the SQLite file.  The file is created if it does
-        not exist (SQLite default behaviour).
-
-    Returns
-    -------
-    aiosqlite.Connection
-        An open, migrated connection ready for use.
+async def init_database(db_path: str) -> "aiosqlite.Connection":
     """
+    Open an aiosqlite connection, enable foreign-key enforcement, and run
+    migrations.  Returns the open connection for use throughout the application.
+
+    The caller is responsible for closing the connection on shutdown.
+
+    Args:
+        db_path: Filesystem path to the SQLite database file.  Will be created
+                 if it does not exist.
+
+    Returns:
+        An open aiosqlite.Connection with migrations applied.
+    """
+    import aiosqlite  # local import keeps module importable without aiosqlite
+
     conn = await aiosqlite.connect(db_path)
     conn.row_factory = aiosqlite.Row
     await conn.execute("PRAGMA foreign_keys = ON")
