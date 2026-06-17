@@ -68,3 +68,19 @@ def minimal_schema_json() -> str:
 def registry() -> ArtifactRegistry:
     """Fresh, empty ``ArtifactRegistry``."""
     return ArtifactRegistry()
+
+
+
+# ── Layer 2 config fixture ────────────────────────────────────────────────────
+
+
+@pytest.fixture()
+def mock_config() -> "ContextaConfig":
+    """Minimal ``ContextaConfig`` for Layer 2 Arbitrator unit tests.
+
+    Passes ``llm_backend`` directly so no environment variable is required.
+    No real LLM calls are made — ``litellm.acompletion`` is always mocked.
+    """
+    from contexta.config import ContextaConfig
+
+    return ContextaConfig(llm_backend="ollama/mistral")
