@@ -57,9 +57,15 @@ _valid_backend = st.builds(
     _identifier,
 )
 
-# Strings that do NOT contain '/' — must be rejected
+# Strings that do NOT contain '/' — must be rejected.
+# blacklist_categories=('Cs',) excludes Unicode surrogate code points
+# (U+D800–U+DFFF) which are not valid in UTF-8 and cause UnicodeEncodeError
+# when passed to os.environ via patch.dict.
 _invalid_backend = st.text(
-    alphabet=st.characters(blacklist_characters="/\x00\n"),
+    alphabet=st.characters(
+        blacklist_characters="/\x00\n",
+        blacklist_categories=("Cs",),
+    ),
     min_size=1,
     max_size=64,
 ).filter(lambda s: s.strip() and "/" not in s)
