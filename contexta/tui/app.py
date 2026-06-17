@@ -62,7 +62,6 @@ class ContextaApp(App):
         export_path: str = "/exports",
         db_conn: Optional["aiosqlite.Connection"] = None,
         config: Optional["ContextaConfig"] = None,
-        config: Optional["ContextaConfig"] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -71,7 +70,6 @@ class ContextaApp(App):
         self.node_name: str = node_name
         self.export_path: str = export_path
         self._db_conn = db_conn
-        self._config = config
         self._config = config
 
         # Orchestrator and blueprint manager are injected after construction
