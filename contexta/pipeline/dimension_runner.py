@@ -4,8 +4,10 @@ Design contracts
 ----------------
 - ``TaskOrchestrator`` pre-populates exactly one ``DimensionTask`` per
   ``ReviewDimensionEnum`` value at construction time.
-- ``launch_all()`` uses ``asyncio.gather`` to run all 12 dimensions concurrently
-  with ``return_exceptions=True`` so one failure does not abort the others.
+- ``launch_all()`` runs all 12 dimensions **sequentially** with a configurable
+  inter-task delay (``request_delay_seconds``) to respect the upstream LLM
+  provider's TPM ceiling.  One task failure never aborts the remaining
+  dimensions — ``_run_single()`` catches and records all exceptions internally.
 - The runner function returned by ``make_dimension_runner()`` performs LLM
   call + Pydantic validation ONLY — it never writes to the database.
 - ``commit_exploration_node()`` performs the single all-or-nothing DB write
@@ -76,27 +78,45 @@ class TaskOrchestrator:
         Async callable that accepts a ``ReviewDimensionEnum`` and returns a
         validated ``ReviewNodePayload``.  Constructed by
         ``make_dimension_runner()``.
+    request_delay_seconds:
+        Seconds to wait between consecutive dimension calls.  Defaults to
+        ``0.0`` (no delay) so that unit tests run without artificial pausing.
+        Production callers should pass ``config.llm_request_delay_seconds``
+        (default 2.5 s) to stay within the provider's TPM ceiling.
     """
 
     def __init__(
         self,
         on_state_change: Callable[[DimensionTask], Awaitable[None]],
         runner_fn: Callable[[ReviewDimensionEnum], Awaitable[ReviewNodePayload]],
+        request_delay_seconds: float = 0.0,
     ) -> None:
         self._tasks: dict[ReviewDimensionEnum, DimensionTask] = {
             dim: DimensionTask(dimension=dim) for dim in ReviewDimensionEnum
         }
         self._on_state_change = on_state_change
         self._runner_fn = runner_fn
+        self._request_delay_seconds = request_delay_seconds
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     async def launch_all(self) -> None:
-        """Launch all 12 dimension tasks concurrently via ``asyncio.gather``."""
-        await asyncio.gather(
-            *[self._run_single(dim) for dim in ReviewDimensionEnum],
-            return_exceptions=True,
-        )
+        """Run all 12 dimension tasks sequentially with inter-task pacing.
+
+        Each dimension is awaited to completion before the next one starts.
+        If ``request_delay_seconds > 0``, the orchestrator sleeps for that
+        duration between tasks to respect the provider's TPM ceiling.  The
+        delay is skipped after the final dimension.
+
+        Task failures are absorbed by ``_run_single()`` — a single dimension
+        error never prevents the remaining dimensions from running.
+        """
+        dimensions = list(ReviewDimensionEnum)
+        last_index = len(dimensions) - 1
+        for index, dim in enumerate(dimensions):
+            await self._run_single(dim)
+            if index < last_index and self._request_delay_seconds > 0:
+                await asyncio.sleep(self._request_delay_seconds)
 
     async def retry_dimension(self, dimension: ReviewDimensionEnum) -> None:
         """Reset a FAILED task to PENDING and re-run it independently."""
