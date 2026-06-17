@@ -133,8 +133,11 @@ class MainScreen(Screen):
         """[F] Open the fork-name modal; on confirm delegate to the App."""
         def _on_result(name: str | bool) -> None:
             if isinstance(name, str) and name:
-                # Delegate to the App-level fork handler.
-                self.app.call_from_thread(self.app.handle_fork, name)  # type: ignore[attr-defined]
+                # handle_fork is synchronous and this callback is invoked on
+                # the main asyncio thread — a direct call is both correct and
+                # safe.  call_from_thread is reserved for background threads
+                # calling into the event loop and must NOT be used here.
+                self.app.handle_fork(name)  # type: ignore[attr-defined]
 
         self.app.push_screen(ForkNameModal(), callback=_on_result)
 
