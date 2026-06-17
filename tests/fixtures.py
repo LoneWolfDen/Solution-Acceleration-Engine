@@ -122,3 +122,52 @@ def make_acompletion_sequential_mock() -> AsyncMock:
         return response
 
     return AsyncMock(side_effect=_side_effect)
+
+
+
+# ── Layer 2 synthesis response stub ──────────────────────────────────────────
+
+
+def make_reconciliation_report_response() -> str:
+    """Return a minimal valid ``ReconciliationReport`` JSON string.
+
+    Contains one ``DimensionConflict`` (High severity), two architectural
+    risks, and three actionable recommendations.  ``delivery_confidence_score``
+    is fixed at 72 so tests can assert a specific value.
+
+    ``ready_for_approval`` is ``false`` — the conflict must be resolved first.
+    """
+    return json.dumps(
+        {
+            "executive_summary": (
+                "Project delivery is feasible with identified risks addressed. "
+                "The timeline and resource dimensions present the primary friction point."
+            ),
+            "delivery_confidence_score": 72,
+            "critical_conflicts": [
+                {
+                    "dimensions_involved": ["Timeline", "Resource"],
+                    "description": (
+                        "The proposed delivery timeline is too aggressive given the "
+                        "current resource constraints identified in the resourcing plan."
+                    ),
+                    "severity": "High",
+                    "source_references": ["SOW Section 3", "Resource Plan p.12"],
+                    "suggested_mitigation": (
+                        "Extend the delivery window by four weeks and confirm headcount "
+                        "with the delivery lead before sign-off."
+                    ),
+                }
+            ],
+            "architectural_risks": [
+                "Single point of failure in the API gateway layer.",
+                "No disaster recovery or high-availability plan documented.",
+            ],
+            "actionable_recommendations": [
+                "Revisit resource allocation in the statement of work.",
+                "Add explicit NFR requirements for DR/HA in the architecture section.",
+                "Confirm timeline assumptions with the delivery lead before sign-off.",
+            ],
+            "ready_for_approval": False,
+        }
+    )
