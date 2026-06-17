@@ -56,81 +56,14 @@ from contexta.pipeline.dimension_runner import (
 
 
 # ── LLM mock factory ──────────────────────────────────────────────────────────
+# Factories are centralised in tests/fixtures.py; imported here so this module
+# stays thin and the mock contract has a single source of truth.
 
-
-def _make_dimension_llm_response(dim: ReviewDimensionEnum) -> str:
-    """Return a valid ReviewNodePayload JSON string for a given dimension."""
-    payload = ReviewNodePayload(
-        dimension=dim,
-        findings=[
-            IssueFinding(
-                dimension=dim,
-                confidence=ConfidenceEnum.AMBER,
-                summary=f"Test finding for {dim.value}",
-                detail=f"Detailed analysis of {dim.value}",
-                citations=[
-                    SourceCitation(
-                        file_path="/proposal.md",
-                        line_start=1,
-                        line_end=5,
-                        citation_type=CitationTypeEnum.DIRECT_REFERENCE,
-                        excerpt="test excerpt",
-                    )
-                ],
-                mitigation_routing=MitigationRoutingEnum.RISK_REGISTER,
-            )
-        ],
-        overall_confidence=ConfidenceEnum.AMBER,
-        raw_llm_response="{}",
-    )
-    return payload.model_dump_json()
-
-
-def _make_arbitrator_response() -> str:
-    return json.dumps({
-        "contradictions": [
-            {
-                "dimension_a": "Risk",
-                "dimension_b": "Timeline",
-                "description": "Timeline is optimistic given identified risks",
-            }
-        ]
-    })
-
-
-def _make_acompletion_mock_for_dim(dim: ReviewDimensionEnum) -> AsyncMock:
-    choice = MagicMock()
-    choice.message.content = _make_dimension_llm_response(dim)
-    choice.finish_reason = "stop"
-    response = MagicMock()
-    response.choices = [choice]
-    return AsyncMock(return_value=response)
-
-
-def _make_acompletion_sequential_mock() -> AsyncMock:
-    """Returns a mock that produces dimension responses then an arbitrator response.
-
-    The first 12 calls return dimension payloads; call 13 returns the
-    arbitrator response.
-    """
-    call_count = 0
-    dim_list = list(ReviewDimensionEnum)
-
-    async def _side_effect(**kwargs):
-        nonlocal call_count
-        choice = MagicMock()
-        if call_count < 12:
-            dim = dim_list[call_count % 12]
-            choice.message.content = _make_dimension_llm_response(dim)
-        else:
-            choice.message.content = _make_arbitrator_response()
-        choice.finish_reason = "stop"
-        response = MagicMock()
-        response.choices = [choice]
-        call_count += 1
-        return response
-
-    return AsyncMock(side_effect=_side_effect)
+from tests.fixtures import (
+    make_acompletion_sequential_mock as _make_acompletion_sequential_mock,
+    make_arbitrator_response as _make_arbitrator_response,
+    make_dimension_llm_response as _make_dimension_llm_response,
+)
 
 
 # ── Fixture: in-memory DB ─────────────────────────────────────────────────────
