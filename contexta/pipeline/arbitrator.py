@@ -17,11 +17,24 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import List
+from enum import Enum
+from typing import Awaitable, Callable, List, Optional
 
 from ..llm.provider import LLMConfig, call_llm
 from ..llm.prompts import PromptBuilder
 from ..models.payloads import ReviewNodePayload
+
+
+# ── Status enum ───────────────────────────────────────────────────────────────
+
+
+class ArbitrationStatus(str, Enum):
+    """Lifecycle states emitted by ``ArbitratorEngine.run()`` via its callback."""
+
+    PROCESSING = "PROCESSING"
+    RATE_LIMITED = "RATE_LIMITED"
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
 
 
 # ── Exception ─────────────────────────────────────────────────────────────────
@@ -60,7 +73,11 @@ class ArbitratorEngine:
         self._config = config
         self._builder = builder
 
-    async def run(self, payloads: List[ReviewNodePayload]) -> ArbitratorResult:
+    async def run(
+        self,
+        payloads: List[ReviewNodePayload],
+        callback: Optional[Callable[[ArbitrationStatus, str], Awaitable[None]]] = None,
+    ) -> ArbitratorResult:
         """Execute the Arbitrator synthesis.
 
         Parameters
@@ -68,6 +85,11 @@ class ArbitratorEngine:
         payloads:
             Exactly 12 validated ``ReviewNodePayload`` objects — one per
             ``ReviewDimensionEnum`` value.
+        callback:
+            Optional async callable invoked at each status transition.
+            Receives ``(ArbitrationStatus, detail_string)``.  Exceptions raised
+            inside the callback are silently suppressed so they never abort
+            the pipeline.
 
         Returns
         -------
@@ -80,26 +102,50 @@ class ArbitratorEngine:
             If ``len(payloads) != 12``, if the LLM call fails, or if the
             response JSON cannot be parsed.
         """
+
+        async def _emit(status: ArbitrationStatus, detail: str) -> None:
+            if callback is not None:
+                try:
+                    await callback(status, detail)
+                except Exception:
+                    pass
+
+        await _emit(ArbitrationStatus.PROCESSING, "Validating payload count")
+
         if len(payloads) != 12:
-            raise ArbitratorError(
-                f"Arbitrator requires exactly 12 payloads, got {len(payloads)}"
-            )
+            msg = f"Arbitrator requires exactly 12 payloads, got {len(payloads)}"
+            await _emit(ArbitrationStatus.FAILED, msg)
+            raise ArbitratorError(msg)
 
         serialised = [p.model_dump_json() for p in payloads]
         system, user = self._builder.build_arbitrator_prompt(serialised)
 
+        await _emit(ArbitrationStatus.PROCESSING, "Calling arbitrator LLM")
+
         try:
             response = await call_llm(self._config, system, user)
         except Exception as exc:
+            exc_str = str(exc)
+            if "429" in exc_str or "rate" in exc_str.lower():
+                await _emit(ArbitrationStatus.RATE_LIMITED, "Rate limit encountered")
+            else:
+                await _emit(ArbitrationStatus.FAILED, f"LLM call failed: {exc_str}")
             raise ArbitratorError(f"Arbitrator LLM call failed: {exc}") from exc
+
+        await _emit(ArbitrationStatus.PROCESSING, "Parsing arbitrator response")
 
         try:
             data = json.loads(response.content)
             contradictions: List[dict] = data.get("contradictions", [])
         except (json.JSONDecodeError, AttributeError) as exc:
-            raise ArbitratorError(
-                f"Arbitrator response parsing failed: {exc}"
-            ) from exc
+            msg = f"Arbitrator response parsing failed: {exc}"
+            await _emit(ArbitrationStatus.FAILED, msg)
+            raise ArbitratorError(msg) from exc
+
+        await _emit(
+            ArbitrationStatus.COMPLETE,
+            f"{len(contradictions)} contradiction(s) found",
+        )
 
         return ArbitratorResult(
             contradictions=contradictions,
