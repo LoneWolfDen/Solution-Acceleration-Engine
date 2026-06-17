@@ -484,3 +484,128 @@ async def get_insights_for_tags(
     )
     rows = await cursor.fetchall()
     return [_row_to_insight(r) for r in rows]
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Layer 2 — Synthesis nodes
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Key used inside ``metadata_json`` to store the ``ReconciliationReport`` dict.
+_RECONCILIATION_REPORT_KEY = "reconciliation_report"
+
+
+async def write_synthesis_node(
+    conn: aiosqlite.Connection,
+    project_id: str,
+    parent_id: Optional[str],
+    node_name: str,
+    report: "ReconciliationReport",  # type: ignore[name-defined]
+    version_tag: Optional[str] = None,
+) -> NodeRow:
+    """Persist a Layer 2 ``ReconciliationReport`` as a synthesis node.
+
+    The report is stored in two forms:
+    - ``content_markdown`` — the raw ``model_dump_json()`` string for direct
+      retrieval and export.
+    - ``metadata_json[_RECONCILIATION_REPORT_KEY]`` — the parsed dict so that
+      callers can read individual fields without a full Pydantic round-trip.
+
+    No schema migration is required: the data lives entirely within the
+    existing ``metadata_json`` TEXT column.
+
+    Args:
+        conn:        Open aiosqlite connection.
+        project_id:  FK → projects.id.
+        parent_id:   FK → nodes.id (the Layer 1 exploration node); None if root.
+        node_name:   Human-readable label for this synthesis node.
+        report:      Validated ``ReconciliationReport`` to persist.
+        version_tag: Optional human-assigned version label.
+
+    Returns:
+        NodeRow representing the newly inserted row.
+    """
+    # Local import keeps repositories.py importable without llm.models loaded.
+    from ..llm.models import ReconciliationReport
+
+    # Re-validate to guard against mutated in-memory objects.
+    validated: ReconciliationReport = ReconciliationReport.model_validate(
+        json.loads(report.model_dump_json())
+    )
+
+    row_id = _new_id()
+    now = _now_iso()
+    content_markdown = validated.model_dump_json()
+    metadata = {
+        _RECONCILIATION_REPORT_KEY: validated.model_dump(),
+        "completed_at": now,
+    }
+
+    await conn.execute(
+        """
+        INSERT INTO nodes
+            (id, project_id, parent_id, layer_type, node_name,
+             metadata_json, content_markdown, created_at, version_tag)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            row_id,
+            project_id,
+            parent_id,
+            "synthesis",
+            node_name,
+            json.dumps(metadata),
+            content_markdown,
+            now,
+            version_tag,
+        ),
+    )
+    await conn.commit()
+
+    return NodeRow(
+        id=row_id,
+        project_id=project_id,
+        parent_id=parent_id,
+        layer_type="synthesis",
+        node_name=node_name,
+        metadata_json=metadata,
+        content_markdown=content_markdown,
+        created_at=now,
+        version_tag=version_tag,
+    )
+
+
+async def get_synthesis_report(
+    conn: aiosqlite.Connection,
+    node_id: str,
+) -> "Optional[ReconciliationReport]":  # type: ignore[name-defined]
+    """Return the ``ReconciliationReport`` stored in a synthesis node, or ``None``.
+
+    Reads the node row, extracts ``metadata_json[_RECONCILIATION_REPORT_KEY]``,
+    and re-validates through Pydantic before returning so the caller always
+    receives a fully-typed object.
+
+    Args:
+        conn:    Open aiosqlite connection.
+        node_id: id of the synthesis node to read.
+
+    Returns:
+        ``ReconciliationReport`` if the node exists and contains a valid report;
+        ``None`` if the node does not exist or the key is absent.
+    """
+    from ..llm.models import ReconciliationReport
+
+    node = await get_node(conn, node_id)
+    if node is None:
+        return None
+
+    raw_meta = node.metadata_json
+    metadata: dict = (
+        json.loads(raw_meta) if isinstance(raw_meta, str) else raw_meta
+    )
+
+    report_data = metadata.get(_RECONCILIATION_REPORT_KEY)
+    if report_data is None:
+        return None
+
+    return ReconciliationReport.model_validate(report_data)
