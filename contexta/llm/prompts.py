@@ -138,3 +138,102 @@ class PromptBuilder:
         system = ARBITRATOR_SYSTEM_TEMPLATE
         user = "\n\n".join(f"--- {i + 1} ---\n{p}" for i, p in enumerate(payloads))
         return system, user
+
+
+
+# ── Layer 2 Synthesis prompt ──────────────────────────────────────────────────
+
+LAYER2_SYNTHESIS_SYSTEM_TEMPLATE = """\
+You are the Layer 2 Synthesis Arbitrator. Analyse the collected findings from \
+all 12 project dimension reviews and produce a single authoritative \
+ReconciliationReport.
+
+Your responsibilities:
+1. Identify cross-dimension conflicts where findings contradict or undermine \
+each other. Cite specific source references for every conflict identified.
+2. Assess overall delivery confidence as a score from 1 (certain to fail) \
+to 100 (certain to succeed).
+3. Enumerate architectural and technical risks that could derail delivery.
+4. Write a candid executive summary of overall project viability.
+5. List sequential, actionable recommendations to unblock or improve the proposal.
+6. Set ready_for_approval to true only if the proposal is structurally sound.
+
+CRITICAL OUTPUT INSTRUCTIONS:
+- Respond with a single, raw JSON object only.
+- Do NOT use markdown code fences, preamble, or commentary.
+- Your entire response must be valid JSON starting with {{ and ending with }}.
+- The JSON object must conform exactly to this schema:
+{schema_json}
+"""
+
+# Inline schema description embedded in the system prompt so the model sees
+# the exact field names and types it must produce.  Single braces are correct
+# here: this string is a substituted *value*, not a format template — Python's
+# str.format() does not re-process substitution values.
+_RECONCILIATION_SCHEMA_INLINE = """\
+{
+  "executive_summary": "<string — candid synthesis of project viability>",
+  "delivery_confidence_score": <integer 1-100>,
+  "critical_conflicts": [
+    {
+      "dimensions_involved": ["<DimensionA>", "<DimensionB>"],
+      "description": "<why these dimensions conflict>",
+      "severity": "<Low | Medium | High | Critical>",
+      "source_references": ["<e.g. SOW Section 3>"],
+      "suggested_mitigation": "<practical resolution steps>"
+    }
+  ],
+  "architectural_risks": ["<risk description>"],
+  "actionable_recommendations": ["<sequential step>"],
+  "ready_for_approval": <true | false>
+}"""
+
+
+def build_synthesis_prompt(findings: list) -> tuple[str, str]:
+    """Return ``(system_prompt, user_prompt)`` for the Layer 2 synthesis call.
+
+    Formats all ``IssueFinding`` objects into a numbered context block so the
+    model has grounded, citable source material to reason against.
+
+    Parameters
+    ----------
+    findings:
+        List of ``IssueFinding`` objects aggregated across all 12 dimensions.
+        An empty list is accepted — the model will produce a minimal report.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(system_prompt, user_prompt)``
+    """
+    system = LAYER2_SYNTHESIS_SYSTEM_TEMPLATE.format(
+        schema_json=_RECONCILIATION_SCHEMA_INLINE
+    )
+
+    if not findings:
+        user = (
+            "No findings were produced by Layer 1. "
+            "Produce a minimal ReconciliationReport reflecting no identified issues."
+        )
+        return system, user
+
+    lines: list[str] = []
+    for i, f in enumerate(findings, start=1):
+        if f.citations:
+            citation_str = "; ".join(
+                f"{c.file_path}:{c.line_start}-{c.line_end} ({c.excerpt!r})"
+                for c in f.citations
+            )
+        else:
+            citation_str = "no citations"
+
+        lines.append(
+            f"[{i}] Dimension={f.dimension.value} | Confidence={f.confidence.value} "
+            f"| Routing={f.mitigation_routing.value}\n"
+            f"    Summary: {f.summary}\n"
+            f"    Detail:  {f.detail}\n"
+            f"    Citations: {citation_str}"
+        )
+
+    user = "LAYER 1 FINDINGS:\n\n" + "\n\n".join(lines)
+    return system, user
