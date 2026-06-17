@@ -15,10 +15,14 @@ verified by Property 10 (Temperature-Zero LLM Call Invariant).
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
 import litellm
+
+logger = logging.getLogger(__name__)
 
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
@@ -51,6 +55,77 @@ class LLMResponse:
     content: str
     raw_response: Any
     finish_reason: str
+
+
+# ── JSON normalisation ────────────────────────────────────────────────────────
+
+
+def _normalise_json_content(raw: str, model: str) -> str:
+    """Unwrap a JSON array to its first dict element.
+
+    Groq occasionally violates the ``response_format={"type": "json_object"}``
+    contract by wrapping the requested object inside a JSON array, e.g.::
+
+        [{"dimension": "NFR", "findings": [...], ...}]
+
+    This pre-processor ensures the ``LLMResponse.content`` field always
+    contains a plain JSON *object* so that downstream
+    ``ReviewNodePayload.model_validate_json()`` never receives a list.
+
+    Parameters
+    ----------
+    raw:
+        Raw JSON string returned by the LLM completion.
+    model:
+        LiteLLM model identifier — used only in log / error messages.
+
+    Returns
+    -------
+    str
+        JSON string whose top-level value is guaranteed to be a dict.
+
+    Raises
+    ------
+    LLMCallError
+        * ``raw`` is not valid JSON.
+        * ``raw`` is a JSON array that is empty.
+        * The first element of the array is not a dict.
+        * ``raw`` is valid JSON but neither a dict nor a list.
+    """
+    try:
+        parsed: Any = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise LLMCallError(
+            f"Model {model!r} returned non-JSON content: {exc}"
+        ) from exc
+
+    if isinstance(parsed, list):
+        logger.warning(
+            "Model %r returned a JSON array instead of an object — "
+            "unwrapping first element (array length=%d).",
+            model,
+            len(parsed),
+        )
+        if not parsed:
+            raise LLMCallError(
+                f"Model {model!r} returned an empty JSON array; "
+                "cannot extract a ReviewNodePayload."
+            )
+        first = parsed[0]
+        if not isinstance(first, dict):
+            raise LLMCallError(
+                f"Model {model!r} returned a JSON array whose first element is "
+                f"{type(first).__name__!r}, not a dict; cannot extract payload."
+            )
+        return json.dumps(first)
+
+    if not isinstance(parsed, dict):
+        raise LLMCallError(
+            f"Model {model!r} returned JSON of unexpected type "
+            f"{type(parsed).__name__!r}; expected a dict or a list."
+        )
+
+    return raw
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -118,6 +193,8 @@ async def call_llm(
         raise LLMCallError(
             f"Unexpected LiteLLM response shape for model {config.model!r}: {exc}"
         ) from exc
+
+    content = _normalise_json_content(content, config.model)
 
     return LLMResponse(
         content=content,
