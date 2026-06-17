@@ -39,29 +39,26 @@ class ContextaConfig(BaseSettings):
         extra="ignore",
     )
 
-<<<<<<< feat/final-sprint-e2e-integration
     # ── Required ─────────────────────────────────────────────────────────────
     llm_backend: str  # CONTEXTA_LLM_BACKEND
 
     # ── Optional with defaults ────────────────────────────────────────────────
-=======
-    # ── Required ────────────────────────────────────────────────────────────
-    llm_backend: str  # CONTEXTA_LLM_BACKEND
 
-    # ── Optional with defaults ───────────────────────────────────────────────
->>>>>>> main
     db_path: str = "/data/contexta.db"       # CONTEXTA_DB_PATH
     export_path: str = "/exports"            # CONTEXTA_EXPORT_PATH
     llm_api_key: Optional[str] = None        # CONTEXTA_LLM_API_KEY
     llm_base_url: Optional[str] = None       # CONTEXTA_LLM_BASE_URL
     log_level: str = "WARNING"               # CONTEXTA_LOG_LEVEL
 
-<<<<<<< feat/final-sprint-e2e-integration
     # ── Unified Toggle — MVP configuration path ───────────────────────────────
-=======
-    # ── Unified Toggle — MVP configuration path ──────────────────────────────
->>>>>>> main
     execution_mode: str = "UNIFIED"          # CONTEXTA_EXECUTION_MODE
+
+    # ── Rate limiting ─────────────────────────────────────────────────────────
+    llm_request_delay_seconds: float = 2.5   # CONTEXTA_LLM_REQUEST_DELAY_SECONDS
+
+    # ── Unified Toggle — MVP configuration path ───────────────────────────────
+    execution_mode: str = "UNIFIED"          # CONTEXTA_EXECUTION_MODE
+
 
     @field_validator("llm_backend")
     @classmethod

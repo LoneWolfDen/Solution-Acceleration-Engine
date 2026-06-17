@@ -53,7 +53,10 @@ def _row_to_node(row: aiosqlite.Row) -> NodeRow:
         parent_id=row["parent_id"],
         layer_type=row["layer_type"],
         node_name=row["node_name"],
-        metadata_json=json.loads(row["metadata_json"] or "{}"),
+        # Keep as raw JSON string so callers can decide whether to parse.
+        # Tests that use get_node / list_nodes_for_project expect a
+        # json.loads()-able string; fork_node / write_node return dict directly.
+        metadata_json=row["metadata_json"] or "{}",
         content_markdown=row["content_markdown"] or "",
         created_at=row["created_at"],
         version_tag=row["version_tag"],
