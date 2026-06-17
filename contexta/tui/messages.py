@@ -28,6 +28,9 @@ if TYPE_CHECKING:
 # Defined here so the TUI layer has no dependency on the pipeline layer.
 # When pipeline.dimension_runner ships it re-exports TaskState from here,
 # keeping the canonical definition in one place.
+# Defined here so the TUI layer has no dependency on the pipeline layer.
+# When pipeline.dimension_runner ships it re-exports TaskState from here,
+# keeping the canonical definition in one place.
 
 
 class TaskState(str, Enum):

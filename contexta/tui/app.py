@@ -3,6 +3,7 @@
 Responsibilities
 ----------------
 - Holds the single ``aiosqlite.Connection``, ``ContextaConfig``,
+- Holds the single ``aiosqlite.Connection``, ``ContextaConfig``,
   ``ArtifactRegistry``, and ``PromptBlueprintManager``.
 - Registers ``MainScreen`` as the default screen and ``AdminScreen`` as a named
   screen accessible via ``push_screen("admin")``.
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     # Only imported for type hints; optional at runtime so that the TUI can
     # be launched in environments where the full pipeline is not yet wired.
     import aiosqlite
+    from contexta.config import ContextaConfig
     from contexta.config import ContextaConfig
     from contexta.tui.widgets.pipeline_view import PipelineView
 
@@ -60,6 +62,7 @@ class ContextaApp(App):
         export_path: str = "/exports",
         db_conn: Optional["aiosqlite.Connection"] = None,
         config: Optional["ContextaConfig"] = None,
+        config: Optional["ContextaConfig"] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -68,6 +71,7 @@ class ContextaApp(App):
         self.node_name: str = node_name
         self.export_path: str = export_path
         self._db_conn = db_conn
+        self._config = config
         self._config = config
 
         # Orchestrator and blueprint manager are injected after construction
