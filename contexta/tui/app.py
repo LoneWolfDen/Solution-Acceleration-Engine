@@ -2,11 +2,8 @@
 
 Responsibilities
 ----------------
-<<<<<<< feat/final-sprint-e2e-integration
 - Holds the single ``aiosqlite.Connection``, ``ContextaConfig``,
-=======
-- Holds the single ``aiosqlite.Connection`` (DatabaseContext), ``ContextaConfig``,
->>>>>>> main
+- Holds the single ``aiosqlite.Connection``, ``ContextaConfig``,
   ``ArtifactRegistry``, and ``PromptBlueprintManager``.
 - Registers ``MainScreen`` as the default screen and ``AdminScreen`` as a named
   screen accessible via ``push_screen("admin")``.
@@ -32,10 +29,8 @@ if TYPE_CHECKING:
     # Only imported for type hints; optional at runtime so that the TUI can
     # be launched in environments where the full pipeline is not yet wired.
     import aiosqlite
-<<<<<<< feat/final-sprint-e2e-integration
     from contexta.config import ContextaConfig
-=======
->>>>>>> main
+    from contexta.config import ContextaConfig
     from contexta.tui.widgets.pipeline_view import PipelineView
 
 
@@ -66,10 +61,8 @@ class ContextaApp(App):
         node_name: str = "—",
         export_path: str = "/exports",
         db_conn: Optional["aiosqlite.Connection"] = None,
-<<<<<<< feat/final-sprint-e2e-integration
         config: Optional["ContextaConfig"] = None,
-=======
->>>>>>> main
+        config: Optional["ContextaConfig"] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -78,16 +71,13 @@ class ContextaApp(App):
         self.node_name: str = node_name
         self.export_path: str = export_path
         self._db_conn = db_conn
-<<<<<<< feat/final-sprint-e2e-integration
         self._config = config
-=======
->>>>>>> main
+        self._config = config
 
         # Orchestrator and blueprint manager are injected after construction
         # (wired by __main__.py after async DB init).
         self._orchestrator = None
         self._blueprint_manager = None
-<<<<<<< feat/final-sprint-e2e-integration
         self._llm_config = None
 
         # Wire up blueprint manager and LLM config eagerly if prerequisites
@@ -104,8 +94,6 @@ class ContextaApp(App):
                 api_key=config.llm_api_key,
                 base_url=config.llm_base_url,
             )
-=======
->>>>>>> main
 
     # ── Compose / mount ───────────────────────────────────────────────────────
 
