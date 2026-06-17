@@ -281,3 +281,39 @@ class BlueprintErrorModal(_ModalBase):
 
     def action_dismiss_modal(self) -> None:
         self.dismiss(False)
+
+
+
+# ── ArbitratorErrorModal ──────────────────────────────────────────────────────
+
+class ArbitratorErrorModal(_ModalBase):
+    """Display an ``ArbitratorError`` (or any arbitration failure) to the user.
+
+    Dismiss only — the user must resolve the underlying issue (e.g. missing
+    blueprint, LLM timeout) and retry the [C] Compare action.
+    """
+
+    BINDINGS = [("escape", "dismiss_modal", "Dismiss")]
+
+    def __init__(self, message: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._message = message
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static("⚖  Arbitration Failed", classes="modal-title")
+            yield Static(
+                f"The Layer 2 arbitration could not complete:\n\n"
+                f"{self._message}\n\n"
+                "Ensure all 12 dimensions are complete and a blueprint is "
+                "active, then retry [C] Compare.",
+                classes="modal-body",
+            )
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Dismiss", variant="error", id="btn-dismiss")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(False)
+
+    def action_dismiss_modal(self) -> None:
+        self.dismiss(False)
