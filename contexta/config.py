@@ -43,6 +43,7 @@ class ContextaConfig(BaseSettings):
     llm_backend: str  # CONTEXTA_LLM_BACKEND
 
     # ── Optional with defaults ────────────────────────────────────────────────
+
     db_path: str = "/data/contexta.db"       # CONTEXTA_DB_PATH
     export_path: str = "/exports"            # CONTEXTA_EXPORT_PATH
     llm_api_key: Optional[str] = None        # CONTEXTA_LLM_API_KEY
@@ -54,6 +55,10 @@ class ContextaConfig(BaseSettings):
 
     # ── Rate limiting ─────────────────────────────────────────────────────────
     llm_request_delay_seconds: float = 2.5   # CONTEXTA_LLM_REQUEST_DELAY_SECONDS
+
+    # ── Unified Toggle — MVP configuration path ───────────────────────────────
+    execution_mode: str = "UNIFIED"          # CONTEXTA_EXECUTION_MODE
+
 
     @field_validator("llm_backend")
     @classmethod
