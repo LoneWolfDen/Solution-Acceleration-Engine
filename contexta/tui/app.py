@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, List, Optional
 from textual.app import App, ComposeResult
 
 from contexta.mcp.artifact_registry import ArtifactRegistry
-from contexta.tui.messages import CitationJumpRequested, TaskState
+from contexta.tui.messages import ArbitrationStatusChanged, CitationJumpRequested, TaskState
 from contexta.tui.screens.main_screen import MainScreen
 
 if TYPE_CHECKING:
@@ -178,8 +178,24 @@ class ContextaApp(App):
                 )
             return
 
-        # All complete — proceed (full wiring done in __main__.py).
-        self.notify("Comparison initiated.", title="Compare")
+        # All complete — guard prerequisites then launch the async worker.
+        if self._llm_config is None:
+            self.notify(
+                "LLM not configured.",
+                severity="error",
+                title="Compare",
+            )
+            return
+
+        if self._blueprint_manager is None:
+            self.notify(
+                "No blueprint manager available.",
+                severity="error",
+                title="Compare",
+            )
+            return
+
+        self.run_worker(self._run_arbitration(), exclusive=True, name="arbitration")
 
     def handle_export(self, path: str) -> None:
         """Export the current node state to the given file path."""
@@ -187,6 +203,94 @@ class ContextaApp(App):
             f"Export to {path} initiated.",
             title="Export",
         )
+
+    # ── Arbitration worker ────────────────────────────────────────────────────
+
+    async def _run_arbitration(self) -> None:
+        """Async worker: run ArbitratorEngine, stream status to TUI, handle errors.
+
+        Lifecycle
+        ---------
+        1. Resolve the active blueprint; show ``BlueprintErrorModal`` if absent.
+        2. Build ``ArbitratorEngine`` and call ``run()`` with an async callback
+           that posts ``ArbitrationStatusChanged`` for every status transition.
+        3. On success, push contradictions into ``PipelineView.show_reconciliation()``.
+        4. On ``ArbitratorError``, emit a FAILED status update and open
+           ``ArbitratorErrorModal`` so the user sees a readable description.
+        5. On any unexpected exception, surface it as a non-fatal notification.
+        """
+        from contexta.pipeline.arbitrator import (
+            ArbitratorEngine,
+            ArbitratorError,
+            ArbitrationStatus,
+        )
+        from contexta.llm.prompts import PromptBuilder
+
+        async def _callback(status: ArbitrationStatus, detail: str) -> None:
+            self.post_message(ArbitrationStatusChanged(status=status, detail=detail))
+
+        try:
+            active_bp = await self._blueprint_manager.get_active()
+            if active_bp is None:
+                try:
+                    from contexta.tui.screens.main_screen import MainScreen as MS
+                    main = self.get_screen("main")
+                    if isinstance(main, MS):
+                        main.show_blueprint_error()
+                except Exception:
+                    self.notify(
+                        "No active blueprint. Activate one from the Admin Tab.",
+                        severity="error",
+                        title="Compare",
+                    )
+                return
+
+            # schema_json is only consumed by build_dimension_prompt; the
+            # arbitrator call uses ARBITRATOR_SYSTEM_TEMPLATE directly.
+            builder = PromptBuilder(blueprint=active_bp, schema_json="")
+            payloads = self._orchestrator.get_all_payloads()
+            engine = ArbitratorEngine(config=self._llm_config, builder=builder)
+            result = await engine.run(payloads, callback=_callback)
+
+            # Deliver results to the TUI.
+            try:
+                from contexta.tui.screens.main_screen import MainScreen as MS
+                main = self.get_screen("main")
+                if isinstance(main, MS):
+                    main.pipeline_view.show_reconciliation(result.contradictions)
+            except Exception:
+                pass
+
+        except ArbitratorError as exc:
+            await _callback(ArbitrationStatus.FAILED, str(exc))
+            try:
+                from contexta.tui.widgets.modals import ArbitratorErrorModal
+                self.push_screen(ArbitratorErrorModal(message=str(exc)))
+            except Exception:
+                self.notify(
+                    f"Arbitration failed: {exc}",
+                    severity="error",
+                    title="Compare Error",
+                )
+
+        except Exception as exc:
+            self.notify(
+                f"Unexpected error during arbitration: {exc}",
+                severity="error",
+                title="Compare Error",
+            )
+
+    # ── ArbitrationStatus routing ─────────────────────────────────────────────
+
+    def on_arbitration_status_changed(self, event: ArbitrationStatusChanged) -> None:
+        """Route ``ArbitrationStatusChanged`` to the PipelineView status bar."""
+        try:
+            from contexta.tui.screens.main_screen import MainScreen as MS
+            main = self.get_screen("main")
+            if isinstance(main, MS):
+                main.pipeline_view.show_arbitration_status(event.status, event.detail)
+        except Exception:
+            pass
 
     # ── Orchestrator / blueprint injection ────────────────────────────────────
 
