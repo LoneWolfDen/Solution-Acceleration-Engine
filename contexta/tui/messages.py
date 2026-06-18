@@ -114,3 +114,69 @@ class CitationJumpRequested(Message):
         self.file_path: str = file_path
         self.line_start: int = line_start
         self.line_end: int = line_end
+
+
+class FindingEditRequested(Message):
+    """Posted by ``AnnotatedFindingRow`` when the user presses [i] to annotate.
+
+    Bubbles up from the findings panel through PipelineView → MainScreen →
+    ContextaApp, where it is handled by opening the ``EditFindingModal``.
+
+    Attributes
+    ----------
+    finding_index:
+        Zero-based index of the finding within its parent payload's
+        ``base_findings`` list.
+    dimension:
+        The ``ReviewDimensionEnum`` of the payload containing this finding.
+    base_value:
+        The original AI-produced summary text — pre-filled in the modal so the
+        user can see what they are overriding.
+    detail:
+        Full finding detail text displayed in the modal for context.
+    """
+
+    def __init__(
+        self,
+        finding_index: int,
+        dimension: ReviewDimensionEnum,
+        base_value: str,
+        detail: str,
+    ) -> None:
+        super().__init__()
+        self.finding_index: int = finding_index
+        self.dimension: ReviewDimensionEnum = dimension
+        self.base_value: str = base_value
+        self.detail: str = detail
+
+
+class AnnotationApplied(Message):
+    """Posted by ``ContextaApp`` after a user annotation is confirmed.
+
+    Carries the full annotation data so the FindingsAnnotationPanel can
+    refresh its display without a database round-trip.
+
+    Attributes
+    ----------
+    finding_index:
+        Zero-based index into the parent payload's ``base_findings``.
+    dimension:
+        The ``ReviewDimensionEnum`` of the annotated payload.
+    amended_value:
+        The user's override text.
+    rationale:
+        The user's explanation for the change.
+    """
+
+    def __init__(
+        self,
+        finding_index: int,
+        dimension: ReviewDimensionEnum,
+        amended_value: str,
+        rationale: str,
+    ) -> None:
+        super().__init__()
+        self.finding_index: int = finding_index
+        self.dimension: ReviewDimensionEnum = dimension
+        self.amended_value: str = amended_value
+        self.rationale: str = rationale
