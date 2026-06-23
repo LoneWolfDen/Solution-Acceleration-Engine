@@ -6,17 +6,14 @@ values returned by LLM responses without requiring strict mode.
 
 from enum import Enum
 
-
 class ConfidenceEnum(str, Enum):
     RED = "RED"
     AMBER = "AMBER"
     GREEN = "GREEN"
 
-
 class CitationTypeEnum(str, Enum):
     DIRECT_REFERENCE = "Direct Reference"
     ADVISED_IN_RELATION = "Advised in Relation"
-
 
 class ReviewDimensionEnum(str, Enum):
     INTENT = "Intent"
@@ -32,10 +29,15 @@ class ReviewDimensionEnum(str, Enum):
     LANGUAGE = "Language"
     CONSISTENCY = "Consistency"
 
-
 class MitigationRoutingEnum(str, Enum):
     SCOPE_MODIFICATION = "Scope Modification"
     RISK_REGISTER = "Risk Register"
     ASSUMPTIONS_MATRIX = "Assumptions Matrix"
     BOTH_R_AND_A = "Both R&A"
     IGNORED = "Ignored"
+
+class PhaseEnum(str, Enum):
+    REVIEW = "Review"
+    RECONCILIATION = "Reconciliation"
+    PROPOSAL = "Proposal"
+EOF
