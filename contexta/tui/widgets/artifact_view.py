@@ -38,7 +38,7 @@ from textual.widgets import Label, ListItem, ListView, RichLog
 from contexta.tui.messages import ArtifactIngested, CitationJumpRequested
 
 if TYPE_CHECKING:
-    from contexta.mcp.artifact_registry import IngestedArtifact
+    from contexta.mcp.artifact_registry import ArtifactRegistry, IngestedArtifact
 
 # Highlight style applied to cited lines in the preview.
 _HIGHLIGHT_STYLE = "bold white on dark_orange3"
@@ -84,6 +84,16 @@ class ArtifactView(Widget):
         yield RichLog(id="artifact-preview", highlight=False, markup=False, wrap=False)
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    def populate(self, registry: "ArtifactRegistry") -> None:
+        """Batch-populate the browser from a complete ArtifactRegistry snapshot.
+
+        Replaces any existing entries.  Call this once from ``ContextaApp.on_mount``
+        (via ``call_after_refresh``) to fill the sidebar from pre-loaded artifacts.
+        Subsequent single-file additions should use ``register_artifact()``.
+        """
+        self._artifacts = {a.file_path: a for a in registry.all()}
+        self._refresh_list()
 
     def register_artifact(self, artifact: "IngestedArtifact") -> None:
         """Add or update an artifact entry in the browser list and registry.

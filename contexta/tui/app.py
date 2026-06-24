@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, List, Optional
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 
 from contexta.mcp.artifact_registry import ArtifactRegistry
 from contexta.tui.messages import CitationJumpRequested, TaskState
@@ -43,6 +44,19 @@ class ContextaApp(App):
 
     TITLE = "Project Contexta"
     SUB_TITLE = "Deterministic Solution Validation Pipeline"
+
+    # App-level key bindings — act as fallbacks when no Screen binding matches.
+    # 'r' is unique to the App: MainScreen propagates it upward to action_review().
+    # f/c/p/e/a are shadowed by MainScreen's priority=True bindings while
+    # MainScreen is active, but are available as fallbacks on other screens.
+    BINDINGS = [
+        Binding("f", "fork_iteration",  "Fork Iteration",          show=True),
+        Binding("c", "compare",         "Compare",                  show=True),
+        Binding("p", "run_proposal",    "Run Proposal Generator",   show=True),
+        Binding("e", "export_json",     "Export Flat JSON Packet",  show=True),
+        Binding("r", "review",          "Review",                   show=True),
+        Binding("a", "admin",           "Admin Tab",                show=True),
+    ]
 
     # Named screens — AdminScreen is imported lazily to avoid circular imports
     # and to keep the startup path fast.
@@ -100,7 +114,7 @@ class ContextaApp(App):
         return iter([])
 
     def on_mount(self) -> None:
-        """Install screens and push the default MainScreen."""
+        """Install screens, push the default MainScreen, then populate the sidebar."""
         # Lazy import of AdminScreen to keep the startup critical path clean.
         from contexta.tui.screens.admin_screen import AdminScreen  # noqa: PLC0415
 
@@ -113,6 +127,28 @@ class ContextaApp(App):
         )
         self.install_screen(AdminScreen(), name="admin")
         self.push_screen("main")
+        # Populate the ArtifactView after the first render cycle so that
+        # MainScreen's widgets are fully composed and mounted.
+        self.call_after_refresh(self._populate_artifact_view)
+
+    def _populate_artifact_view(self) -> None:
+        """Batch-populate the ArtifactView with current ArtifactRegistry contents.
+
+        Called via ``call_after_refresh`` from ``on_mount`` so that the widget
+        tree is fully composed before the query runs.  Safe to call when the
+        registry is empty (no-op).
+        """
+        if not self.registry.all():
+            return
+        try:
+            from contexta.tui.widgets.artifact_view import ArtifactView
+
+            av = self.query_one("#artifact-view", ArtifactView)
+            av.populate(self.registry)
+        except Exception:
+            # Widget not yet mounted or query missed — non-fatal; registry
+            # entries can be added later via register_artifact().
+            pass
 
     # ── CitationJump routing ──────────────────────────────────────────────────
 
@@ -197,3 +233,43 @@ class ContextaApp(App):
     def set_blueprint_manager(self, manager) -> None:
         """Inject the PromptBlueprintManager after DB initialisation."""
         self._blueprint_manager = manager
+
+    # ── App-level action handlers (App.BINDINGS fallbacks) ────────────────────
+    # These fire when no Screen binding shadows the key.  On MainScreen, f/c/p/e/a
+    # are intercepted by MainScreen's priority=True BINDINGS; 'r' reaches the App
+    # because MainScreen has no 'r' action defined.
+
+    def action_review(self) -> None:
+        """[R] Activate the Review phase and update the PhaseStatusBar."""
+        try:
+            main = self.get_screen("main")
+            if isinstance(main, MainScreen):
+                main.set_phase("REVIEW")
+        except Exception as exc:
+            self.notify(f"Phase update failed: {exc}", severity="warning")
+
+    def action_fork_iteration(self) -> None:
+        """[F] Fallback — delegates to handle_fork via a name modal."""
+        try:
+            main = self.get_screen("main")
+            if isinstance(main, MainScreen):
+                main.action_fork()
+        except Exception:
+            self.notify("Fork not available.", severity="warning")
+
+    def action_run_proposal(self) -> None:
+        """[P] Fallback — proposal stub."""
+        self.notify(
+            "Proposal Generator is not yet available in this release.",
+            title="[P] Not Implemented",
+            severity="warning",
+        )
+
+    def action_export_json(self) -> None:
+        """[E] Fallback — export confirmation modal."""
+        try:
+            main = self.get_screen("main")
+            if isinstance(main, MainScreen):
+                main.action_export()
+        except Exception:
+            self.notify("Export not available.", severity="warning")

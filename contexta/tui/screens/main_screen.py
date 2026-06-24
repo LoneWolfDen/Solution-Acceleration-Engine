@@ -55,6 +55,61 @@ from contexta.tui.widgets.modals import (
 from contexta.tui.widgets.pipeline_view import PipelineView
 
 
+# ── PhaseStatusBar ─────────────────────────────────────────────────────────────
+
+
+class PhaseStatusBar(Static):
+    """Thin 1-line bar below the header showing the current review phase.
+
+    Phases: IDLE → REVIEW → COMPLETE
+    The bar changes accent colour when the REVIEW phase is active.
+    """
+
+    DEFAULT_CSS = """
+    PhaseStatusBar {
+        height: 1;
+        padding: 0 2;
+        background: $background-darken-1;
+        color: $text-muted;
+    }
+    PhaseStatusBar.-review {
+        background: $success-darken-3;
+        color: $success;
+        text-style: bold;
+    }
+    PhaseStatusBar.-complete {
+        background: $primary-darken-2;
+        color: $primary-lighten-2;
+        text-style: bold;
+    }
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__("Phase: IDLE", **kwargs)
+        self._phase: str = "IDLE"
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def set_phase(self, phase: str) -> None:
+        """Update the displayed phase and apply the matching CSS class.
+
+        Args:
+            phase: One of ``"IDLE"``, ``"REVIEW"``, or ``"COMPLETE"``.
+        """
+        self._phase = phase.upper()
+        self.update(f"Phase: {self._phase}")
+        self.remove_class("-review", "-complete")
+        if self._phase == "REVIEW":
+            self.add_class("-review")
+        elif self._phase == "COMPLETE":
+            self.add_class("-complete")
+
+    @property
+    def current_phase(self) -> str:
+        """Return the current phase string (read-only)."""
+        return self._phase
+
+
 class MainScreen(Screen):
     """The primary application screen."""
 
@@ -63,6 +118,7 @@ class MainScreen(Screen):
         Binding("c", "compare",  "[C] Compare",               show=True,  priority=True),
         Binding("p", "proposal", "[P] Run Proposal Generator", show=True,  priority=True),
         Binding("e", "export",   "[E] Export Flat JSON Packet", show=True, priority=True),
+        Binding("r", "review",   "[R] Review",                show=True,  priority=True),
         Binding("a", "admin",    "[⚙] Admin Tab",             show=True,  priority=True),
     ]
 
@@ -91,6 +147,7 @@ class MainScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
+        yield PhaseStatusBar(id="phase-status-bar")
         with Horizontal(id="main-split"):
             yield ArtifactView(id="artifact-view")
             yield PipelineView(id="pipeline-view")
@@ -123,6 +180,10 @@ class MainScreen(Screen):
         self._node_name = node_name
         self.sub_title = f"Node: {node_name}"
         self.pipeline_view.update_metadata(node_name=node_name)
+
+    def set_phase(self, phase: str) -> None:
+        """Update the PhaseStatusBar to reflect the new pipeline phase."""
+        self.query_one("#phase-status-bar", PhaseStatusBar).set_phase(phase)
 
     # ── Footer actions ────────────────────────────────────────────────────────
     # Each action_ method completes synchronously or opens a modal within the
@@ -167,6 +228,12 @@ class MainScreen(Screen):
     def action_admin(self) -> None:
         """[A] Switch to the Admin screen."""
         self.app.push_screen("admin")
+
+    def action_review(self) -> None:
+        """[R] Activate Review phase — delegates to ContextaApp.action_review()."""
+        # ContextaApp owns the PhaseStatusBar update logic so that any screen
+        # (not just MainScreen) can trigger a phase transition consistently.
+        self.app.action_review()  # type: ignore[attr-defined]
 
     # ── Modal helpers (called by App) ─────────────────────────────────────────
 
