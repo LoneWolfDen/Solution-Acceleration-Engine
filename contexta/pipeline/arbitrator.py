@@ -27,6 +27,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from typing import List, Optional, TYPE_CHECKING
+from enum import Enum
+from typing import Awaitable, Callable, List, Optional
 
 from ..llm.provider import LLMConfig, call_llm
 from ..llm.prompts import PromptBuilder
@@ -34,6 +36,18 @@ from ..models.payloads import ReviewNodePayload
 
 if TYPE_CHECKING:
     from ..knowledge.memory import KnowledgeContext, KnowledgeMemoryService
+
+
+# ── Status enum ───────────────────────────────────────────────────────────────
+
+
+class ArbitrationStatus(str, Enum):
+    """Lifecycle states emitted by ``ArbitratorEngine.run()`` via its callback."""
+
+    PROCESSING = "PROCESSING"
+    RATE_LIMITED = "RATE_LIMITED"
+    COMPLETE = "COMPLETE"
+    FAILED = "FAILED"
 
 
 # ── Exception ─────────────────────────────────────────────────────────────────
@@ -86,6 +100,7 @@ class ArbitratorEngine:
         self,
         payloads: List[ReviewNodePayload],
         context: Optional["KnowledgeContext"] = None,
+        callback: Optional[Callable[[ArbitrationStatus, str], Awaitable[None]]] = None,
     ) -> ArbitratorResult:
         """Execute the Arbitrator synthesis.
 
@@ -97,6 +112,11 @@ class ArbitratorEngine:
         context:
             Optional ``KnowledgeContext`` used to fetch prior observations from
             KnowledgeMemory.  Ignored when ``knowledge_service`` is ``None``.
+        callback:
+            Optional async callable invoked at each status transition.
+            Receives ``(ArbitrationStatus, detail_string)``.  Exceptions raised
+            inside the callback are silently suppressed so they never abort
+            the pipeline.
 
         Returns
         -------
@@ -109,10 +129,20 @@ class ArbitratorEngine:
             If ``len(payloads) != 12``, if the LLM call fails, or if the
             response JSON cannot be parsed.
         """
+
+        async def _emit(status: ArbitrationStatus, detail: str) -> None:
+            if callback is not None:
+                try:
+                    await callback(status, detail)
+                except Exception:
+                    pass
+
+        await _emit(ArbitrationStatus.PROCESSING, "Validating payload count")
+
         if len(payloads) != 12:
-            raise ArbitratorError(
-                f"Arbitrator requires exactly 12 payloads, got {len(payloads)}"
-            )
+            msg = f"Arbitrator requires exactly 12 payloads, got {len(payloads)}"
+            await _emit(ArbitrationStatus.FAILED, msg)
+            raise ArbitratorError(msg)
 
         observations = []
         if self._knowledge_service is not None and context is not None:
@@ -121,18 +151,32 @@ class ArbitratorEngine:
         serialised = [p.model_dump_json() for p in payloads]
         system, user = self._builder.build_arbitrator_prompt(serialised, observations)
 
+        await _emit(ArbitrationStatus.PROCESSING, "Calling arbitrator LLM")
+
         try:
             response = await call_llm(self._config, system, user)
         except Exception as exc:
+            exc_str = str(exc)
+            if "429" in exc_str or "rate" in exc_str.lower():
+                await _emit(ArbitrationStatus.RATE_LIMITED, "Rate limit encountered")
+            else:
+                await _emit(ArbitrationStatus.FAILED, f"LLM call failed: {exc_str}")
             raise ArbitratorError(f"Arbitrator LLM call failed: {exc}") from exc
+
+        await _emit(ArbitrationStatus.PROCESSING, "Parsing arbitrator response")
 
         try:
             data = json.loads(response.content)
             contradictions: List[dict] = data.get("contradictions", [])
         except (json.JSONDecodeError, AttributeError) as exc:
-            raise ArbitratorError(
-                f"Arbitrator response parsing failed: {exc}"
-            ) from exc
+            msg = f"Arbitrator response parsing failed: {exc}"
+            await _emit(ArbitrationStatus.FAILED, msg)
+            raise ArbitratorError(msg) from exc
+
+        await _emit(
+            ArbitrationStatus.COMPLETE,
+            f"{len(contradictions)} contradiction(s) found",
+        )
 
         return ArbitratorResult(
             contradictions=contradictions,
