@@ -253,7 +253,7 @@ class PipelineView(Widget):
     # ── Keyboard navigation ───────────────────────────────────────────────────
 
     def action_jump_to_finding(self, index: int) -> None:
-        """Jump to finding at *index* in the current findings list (0-based)."""
+        """Jump to finding at index in the current findings list (0-based)."""
         if 0 <= index < len(self._findings):
             self.select_finding(self._findings[index])
 
