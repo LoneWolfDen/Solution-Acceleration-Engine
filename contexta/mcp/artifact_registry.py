@@ -11,12 +11,15 @@ Design contracts
   (Property 7 / Property 8).
 - ``build_context_string()`` produces the concatenated prompt context block
   consumed by ``PromptBuilder.build_dimension_prompt()``.
+- ``scan_directory()`` provides a filesystem-based ingestion path for
+  offline / test-artifact loading at startup (no MCP transport required).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 
 # ── Data class ────────────────────────────────────────────────────────────────
@@ -24,7 +27,7 @@ from typing import Dict, List, Optional
 
 @dataclass
 class IngestedArtifact:
-    """Represents a single source file that has been ingested via MCP.
+    """Represents a single source file that has been ingested via MCP or disk.
 
     Attributes
     ----------
@@ -124,3 +127,61 @@ class ArtifactRegistry:
             parts.append(artifact.content)
             parts.append("\n---\n")
         return "\n".join(parts)
+
+    # ── Filesystem scanning ───────────────────────────────────────────────────
+
+    def scan_directory(
+        self,
+        directory: "str | Path",
+        extensions: Tuple[str, ...] = (".md", ".txt"),
+    ) -> List[IngestedArtifact]:
+        """Scan *directory* for text files and register each one.
+
+        Reads every file whose suffix (case-insensitive) matches *extensions*,
+        counts lines via ``str.splitlines()``, and registers an
+        ``IngestedArtifact`` with ``uri = "file://<absolute_path>"``.
+
+        Re-registering an already-known path overwrites the prior entry, so
+        calling ``scan_directory()`` again after editing a file always reflects
+        the latest content.
+
+        Parameters
+        ----------
+        directory:
+            Path to the directory to scan.  Non-existent or non-directory
+            paths are silently ignored (returns an empty list) so the startup
+            sequence never crashes when the path is absent.
+        extensions:
+            Tuple of lowercase file-extension strings to include.  Defaults
+            to ``(".md", ".txt")``.
+
+        Returns
+        -------
+        List[IngestedArtifact]
+            Artifacts that were registered during this scan, in filesystem
+            sort order.  Already-registered paths that were overwritten are
+            included.
+        """
+        dir_path = Path(directory)
+        if not dir_path.is_dir():
+            return []
+
+        registered: List[IngestedArtifact] = []
+        for file_path in sorted(dir_path.iterdir()):
+            if not file_path.is_file():
+                continue
+            if file_path.suffix.lower() not in extensions:
+                continue
+            try:
+                content = file_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            artifact = IngestedArtifact(
+                uri=f"file://{file_path.resolve()}",
+                file_path=str(file_path.resolve()),
+                content=content,
+                line_count=len(content.splitlines()),
+            )
+            self.register(artifact)
+            registered.append(artifact)
+        return registered

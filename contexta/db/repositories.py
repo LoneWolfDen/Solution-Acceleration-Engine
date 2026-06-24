@@ -21,7 +21,7 @@ import aiosqlite
 from pydantic import ValidationError
 
 from ..models.payloads import ReviewNodePayload
-from .models import BlueprintRow, InsightRow, NodeRow, ProjectRow
+from .models import BlueprintRow, InsightRow, NodeRow, ObservationRow, ProjectRow
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,17 @@ def _row_to_insight(row: aiosqlite.Row) -> InsightRow:
         observed_pattern=row["observed_pattern"],
         frequency_count=row["frequency_count"],
         last_updated=row["last_updated"],
+    )
+
+
+def _row_to_observation(row: aiosqlite.Row) -> ObservationRow:
+    return ObservationRow(
+        id=row["id"],
+        source=row["source"],
+        dimension_a=row["dimension_a"],
+        dimension_b=row["dimension_b"],
+        observation=row["observation"],
+        created_at=row["created_at"],
     )
 
 
@@ -609,3 +620,55 @@ async def get_synthesis_report(
         return None
 
     return ReconciliationReport.model_validate(report_data)
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Knowledge Observations
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def record_observation(
+    conn: aiosqlite.Connection,
+    source: str,
+    observation: str,
+    dimension_a: Optional[str] = None,
+    dimension_b: Optional[str] = None,
+) -> ObservationRow:
+    """Insert a new knowledge observation row and return it.
+
+    Called by ``KnowledgeMemoryService`` whenever the Arbitrator detects a
+    contradiction (amendment) between dimension outputs, so the system builds
+    a persistent record of cross-dimension friction patterns over time.
+
+    Args:
+        conn:        Open aiosqlite connection.
+        source:      Origin of the observation (e.g. ``"arbitrator"``).
+        observation: Human-readable description of the pattern or conflict.
+        dimension_a: First dimension name involved, if applicable.
+        dimension_b: Second dimension name involved, if applicable.
+
+    Returns:
+        ObservationRow for the newly inserted record.
+    """
+    row_id = _new_id()
+    now = _now_iso()
+
+    await conn.execute(
+        """
+        INSERT INTO knowledge_observations
+            (id, source, dimension_a, dimension_b, observation, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (row_id, source, dimension_a, dimension_b, observation, now),
+    )
+    await conn.commit()
+
+    return ObservationRow(
+        id=row_id,
+        source=source,
+        dimension_a=dimension_a,
+        dimension_b=dimension_b,
+        observation=observation,
+        created_at=now,
+    )

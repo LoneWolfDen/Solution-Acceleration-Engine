@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 from ..llm.provider import LLMConfig, call_llm
 from ..llm.prompts import PromptBuilder
@@ -54,11 +54,23 @@ class ArbitratorEngine:
         LLM backend configuration passed through to ``call_llm()``.
     builder:
         ``PromptBuilder`` instance (uses the active blueprint).
+    knowledge_service:
+        Optional ``KnowledgeMemoryService``.  When provided, each detected
+        contradiction is persisted to ``knowledge_observations`` via
+        ``record_observation()`` so the system accumulates cross-session
+        pattern memory.  When ``None`` the engine runs without persistence
+        (backwards-compatible with all existing tests).
     """
 
-    def __init__(self, config: LLMConfig, builder: PromptBuilder) -> None:
+    def __init__(
+        self,
+        config: LLMConfig,
+        builder: PromptBuilder,
+        knowledge_service: Optional["KnowledgeMemoryService"] = None,  # type: ignore[name-defined]
+    ) -> None:
         self._config = config
         self._builder = builder
+        self._knowledge_service = knowledge_service
 
     async def run(self, payloads: List[ReviewNodePayload]) -> ArbitratorResult:
         """Execute the Arbitrator synthesis.
@@ -100,6 +112,24 @@ class ArbitratorEngine:
             raise ArbitratorError(
                 f"Arbitrator response parsing failed: {exc}"
             ) from exc
+
+        # Persist each contradiction as a knowledge observation so the system
+        # builds cross-session memory of recurring dimension friction patterns.
+        if self._knowledge_service is not None and contradictions:
+            for contradiction in contradictions:
+                try:
+                    await self._knowledge_service.record_observation(
+                        source="arbitrator",
+                        observation=contradiction.get("description", ""),
+                        dimension_a=contradiction.get("dimension_a"),
+                        dimension_b=contradiction.get("dimension_b"),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    # Non-fatal: a DB error must never abort the arbitration result.
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "ArbitratorEngine: failed to record observation: %s", exc
+                    )
 
         return ArbitratorResult(
             contradictions=contradictions,

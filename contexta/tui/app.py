@@ -3,7 +3,6 @@
 Responsibilities
 ----------------
 - Holds the single ``aiosqlite.Connection``, ``ContextaConfig``,
-- Holds the single ``aiosqlite.Connection``, ``ContextaConfig``,
   ``ArtifactRegistry``, and ``PromptBlueprintManager``.
 - Registers ``MainScreen`` as the default screen and ``AdminScreen`` as a named
   screen accessible via ``push_screen("admin")``.

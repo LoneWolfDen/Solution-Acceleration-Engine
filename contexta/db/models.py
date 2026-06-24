@@ -63,3 +63,15 @@ class InsightRow:
     observed_pattern:       str
     frequency_count:        int
     last_updated:           str   # ISO-8601 UTC
+
+
+@dataclass
+class ObservationRow:
+    """Mirrors one row of the knowledge_observations table."""
+
+    id:          str
+    source:      str
+    dimension_a: Optional[str]
+    dimension_b: Optional[str]
+    observation: str
+    created_at:  str   # ISO-8601 UTC

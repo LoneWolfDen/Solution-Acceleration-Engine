@@ -34,7 +34,7 @@ from textual.containers import ScrollableContainer, Vertical
 from textual.widget import Widget
 from textual.widgets import Label, Static
 
-from contexta.models.enums import ReviewDimensionEnum
+from contexta.models.enums import PhaseEnum, ReviewDimensionEnum
 from contexta.models.findings import IssueFinding
 from contexta.tui.messages import CitationJumpRequested, DimensionStateChanged, TaskState
 from contexta.tui.widgets.dimension_row import DimensionRow
@@ -96,6 +96,64 @@ class MetadataCluster(Widget):
         if self._tags:
             return "Tags: " + "  ".join(self._tags)
         return "Tags: (none)"
+
+
+class PhaseStatusBar(Widget):
+    """Displays the currently active PhaseEnum in the pipeline header.
+
+    Sits between the MetadataCluster and the 12-dimension scroll list so the
+    user always knows which phase (Review → Reconciliation → Proposal) the
+    active session is in.  Phase changes are pushed via ``set_phase()``.
+    """
+
+    DEFAULT_CSS = """
+    PhaseStatusBar {
+        height: 1;
+        padding: 0 2;
+        background: $primary-darken-2;
+        color: $text;
+    }
+    PhaseStatusBar.-review {
+        background: $primary-darken-2;
+        color: $text;
+    }
+    PhaseStatusBar.-reconciliation {
+        background: $warning-darken-2;
+        color: $text;
+    }
+    PhaseStatusBar.-proposal {
+        background: $success-darken-2;
+        color: $text;
+    }
+    PhaseStatusBar #phase-label {
+        width: 1fr;
+    }
+    """
+
+    _PHASE_ICONS: dict[PhaseEnum, str] = {
+        PhaseEnum.REVIEW:         "🔍",
+        PhaseEnum.RECONCILIATION: "⚖",
+        PhaseEnum.PROPOSAL:       "📋",
+    }
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._phase: PhaseEnum = PhaseEnum.REVIEW
+        self.add_class("-review")
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._phase_label(), id="phase-label")
+
+    def set_phase(self, phase: PhaseEnum) -> None:
+        """Update the displayed phase and swap the CSS colour modifier."""
+        self._phase = phase
+        self.remove_class("-review", "-reconciliation", "-proposal")
+        self.add_class(f"-{phase.value.lower()}")
+        self.query_one("#phase-label", Static).update(self._phase_label())
+
+    def _phase_label(self) -> str:
+        icon = self._PHASE_ICONS[self._phase]
+        return f"{icon}  Phase: {self._phase.value}"
 
 
 class ReconciliationPanel(Widget):
@@ -175,6 +233,7 @@ class PipelineView(Widget):
 
     def compose(self) -> ComposeResult:
         yield MetadataCluster(id="metadata-cluster")
+        yield PhaseStatusBar(id="phase-status-bar")
 
         with ScrollableContainer(id="dimension-scroll"):
             for dim in ReviewDimensionEnum:
@@ -221,6 +280,19 @@ class PipelineView(Widget):
         self.query_one("#reconciliation-panel", ReconciliationPanel).show_results(
             contradictions
         )
+
+    def set_phase(self, phase: PhaseEnum) -> None:
+        """Advance the active phase displayed in the PhaseStatusBar.
+
+        Call this whenever the orchestration layer transitions between the
+        Review, Reconciliation, and Proposal phases so the user always sees
+        the correct phase in the pipeline header.
+        """
+        self.query_one("#phase-status-bar", PhaseStatusBar).set_phase(phase)
+
+    def get_phase(self) -> PhaseEnum:
+        """Return the currently displayed phase (used by tests)."""
+        return self.query_one("#phase-status-bar", PhaseStatusBar)._phase
 
     def load_findings(self, findings: List[IssueFinding]) -> None:
         """Register the current set of IssueFinding objects for navigation.

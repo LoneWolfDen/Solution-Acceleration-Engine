@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Bump this integer whenever new DDL is added to DDL_STATEMENTS.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # All DDL statements executed in order during migration.
 # CREATE TABLE IF NOT EXISTS ensures idempotency on re-runs.
@@ -76,6 +76,20 @@ DDL_STATEMENTS: list[str] = [
         frequency_count        INTEGER NOT NULL DEFAULT 1,
         last_updated           TEXT NOT NULL,
         UNIQUE(client_or_industry_tag, observed_pattern)
+    )
+    """,
+
+    # ── Knowledge Observations ────────────────────────────────────────────────
+    # Records each contradiction or amendment detected during arbitration so
+    # the system can learn from repeated patterns across sessions.
+    """
+    CREATE TABLE IF NOT EXISTS knowledge_observations (
+        id          TEXT PRIMARY KEY,
+        source      TEXT NOT NULL,
+        dimension_a TEXT,
+        dimension_b TEXT,
+        observation TEXT NOT NULL,
+        created_at  TEXT NOT NULL
     )
     """,
 ]

@@ -56,9 +56,6 @@ class ContextaConfig(BaseSettings):
     # ── Rate limiting ─────────────────────────────────────────────────────────
     llm_request_delay_seconds: float = 2.5   # CONTEXTA_LLM_REQUEST_DELAY_SECONDS
 
-    # ── Unified Toggle — MVP configuration path ───────────────────────────────
-    execution_mode: str = "UNIFIED"          # CONTEXTA_EXECUTION_MODE
-
 
     @field_validator("llm_backend")
     @classmethod
