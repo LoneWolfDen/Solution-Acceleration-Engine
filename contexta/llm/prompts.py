@@ -18,12 +18,22 @@ Design contracts
 3. **Arbitrator parity** — ``build_arbitrator_prompt()`` carries the same
    CRITICAL OUTPUT INSTRUCTIONS block to guarantee consistent parsing
    behaviour across both pipeline layers.
+
+4. **Contextual Constraints injection** — both ``build_dimension_prompt()``
+   and ``build_arbitrator_prompt()`` accept an optional ``observations`` list.
+   When provided, a CONTEXTUAL CONSTRAINTS block is appended to the system
+   prompt so the LLM applies prior user interventions as learned guidance.
 """
 
 from __future__ import annotations
 
+from typing import List, Optional, TYPE_CHECKING
+
 from ..db.models import BlueprintRow
 from ..models.enums import ReviewDimensionEnum
+
+if TYPE_CHECKING:
+    from ..db.models import ObservationRow
 
 # ── System prompt template ────────────────────────────────────────────────────
 
@@ -54,6 +64,45 @@ CRITICAL OUTPUT INSTRUCTIONS:
 of objects, each with keys: "dimension_a", "dimension_b", "description".
 """
 
+# ── Contextual Constraints block ──────────────────────────────────────────────
+
+_CONSTRAINTS_HEADER = """
+CONTEXTUAL CONSTRAINTS (from Knowledge Memory):
+The following amendments were applied by users in prior analyses. \
+Treat them as learned guidance and incorporate them into your output:
+"""
+
+
+def _build_constraints_block(observations: List["ObservationRow"]) -> str:
+    """Return a formatted CONTEXTUAL CONSTRAINTS section from observations.
+
+    Returns an empty string when the list is empty so callers can safely
+    concatenate without producing stray whitespace.
+
+    Parameters
+    ----------
+    observations:
+        ObservationRow objects retrieved from KnowledgeMemory for the current
+        pipeline context.  Ordered newest-first by the repository layer.
+
+    Returns
+    -------
+    str
+        Multi-line constraints block, or ``""`` if observations is empty.
+    """
+    if not observations:
+        return ""
+
+    lines: List[str] = [_CONSTRAINTS_HEADER]
+    for i, obs in enumerate(observations, start=1):
+        lines.append(
+            f"{i}. [Dimension: {obs.dimension} | Phase: {obs.phase}]\n"
+            f"   Original: {obs.base_value}\n"
+            f"   Amendment: {obs.amended_value}\n"
+            f"   Rationale: {obs.rationale}"
+        )
+    return "\n".join(lines)
+
 
 # ── PromptBuilder ─────────────────────────────────────────────────────────────
 
@@ -82,6 +131,7 @@ class PromptBuilder:
         self,
         dimension: ReviewDimensionEnum,
         artifact_context: str,
+        observations: Optional[List["ObservationRow"]] = None,
     ) -> tuple[str, str]:
         """Return ``(system_prompt, user_prompt)`` for a single dimension review.
 
@@ -90,6 +140,11 @@ class PromptBuilder:
         - The full ``master_prompt_text`` from the active blueprint
         - The CRITICAL OUTPUT INSTRUCTIONS block (raw JSON, no fences)
         - The ``ReviewNodePayload`` JSON schema
+
+        When *observations* is non-empty a CONTEXTUAL CONSTRAINTS block is
+        appended so the LLM incorporates prior user interventions as learned
+        guidance.  This is the primary mechanism by which the engine learns
+        from manual corrections across runs.
 
         The user prompt contains all ingested artifact content formatted as a
         labelled block so the model has grounded, citable source material.
@@ -101,6 +156,9 @@ class PromptBuilder:
         artifact_context:
             Concatenated artifact content produced by
             ``ArtifactRegistry.build_context_string()``.
+        observations:
+            Optional list of ``ObservationRow`` objects from KnowledgeMemory.
+            Injected as Contextual Constraints when provided and non-empty.
 
         Returns
         -------
@@ -112,23 +170,32 @@ class PromptBuilder:
             master_prompt_text=self._blueprint.master_prompt_text,
             schema_json=self._schema_json,
         )
+        constraints = _build_constraints_block(observations or [])
+        if constraints:
+            system = system + constraints
         user = f"PROPOSAL ARTIFACTS:\n\n{artifact_context}"
         return system, user
 
     def build_arbitrator_prompt(
         self,
         payloads: list[str],
+        observations: Optional[List["ObservationRow"]] = None,
     ) -> tuple[str, str]:
         """Return ``(system_prompt, user_prompt)`` for the Layer 2 Arbitrator.
 
         The system prompt carries the same CRITICAL OUTPUT INSTRUCTIONS block
         as dimension prompts, enforcing raw JSON output for parsing stability.
 
+        When *observations* is non-empty a CONTEXTUAL CONSTRAINTS block is
+        appended to guide contradiction detection with prior user feedback.
+
         Parameters
         ----------
         payloads:
             List of ``ReviewNodePayload.model_dump_json()`` strings — one per
             completed dimension review (exactly 12 expected by the Arbitrator).
+        observations:
+            Optional list of ``ObservationRow`` objects from KnowledgeMemory.
 
         Returns
         -------
@@ -136,6 +203,9 @@ class PromptBuilder:
             ``(system_prompt, user_prompt)``
         """
         system = ARBITRATOR_SYSTEM_TEMPLATE
+        constraints = _build_constraints_block(observations or [])
+        if constraints:
+            system = system + constraints
         user = "\n\n".join(f"--- {i + 1} ---\n{p}" for i, p in enumerate(payloads))
         return system, user
 
@@ -189,17 +259,25 @@ _RECONCILIATION_SCHEMA_INLINE = """\
 }"""
 
 
-def build_synthesis_prompt(findings: list) -> tuple[str, str]:
+def build_synthesis_prompt(
+    findings: list,
+    observations: Optional[List["ObservationRow"]] = None,
+) -> tuple[str, str]:
     """Return ``(system_prompt, user_prompt)`` for the Layer 2 synthesis call.
 
     Formats all ``IssueFinding`` objects into a numbered context block so the
     model has grounded, citable source material to reason against.
+
+    When *observations* is non-empty a CONTEXTUAL CONSTRAINTS block is appended
+    to the system prompt so prior user interventions guide the synthesis.
 
     Parameters
     ----------
     findings:
         List of ``IssueFinding`` objects aggregated across all 12 dimensions.
         An empty list is accepted — the model will produce a minimal report.
+    observations:
+        Optional list of ``ObservationRow`` objects from KnowledgeMemory.
 
     Returns
     -------
@@ -209,6 +287,9 @@ def build_synthesis_prompt(findings: list) -> tuple[str, str]:
     system = LAYER2_SYNTHESIS_SYSTEM_TEMPLATE.format(
         schema_json=_RECONCILIATION_SCHEMA_INLINE
     )
+    constraints = _build_constraints_block(observations or [])
+    if constraints:
+        system = system + constraints
 
     if not findings:
         user = (
