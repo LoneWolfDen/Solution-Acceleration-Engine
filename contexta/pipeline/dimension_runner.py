@@ -12,6 +12,12 @@ Design contracts
   call + Pydantic validation ONLY — it never writes to the database.
 - ``commit_exploration_node()`` performs the single all-or-nothing DB write
   after all 12 tasks reach COMPLETE state.
+- ``make_dimension_runner()`` optionally accepts a ``KnowledgeMemoryService``
+  and ``node_id``.  When provided, observations are fetched before each LLM
+  call and injected as Contextual Constraints into the system prompt.
+- ``TaskOrchestrator.add_annotation()`` mutates the in-memory payload for a
+  completed dimension to append a ``UserAnnotation``, keeping UI state and
+  in-memory state aligned before the next DB write.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Awaitable, Callable, List, Optional
+from typing import Awaitable, Callable, List, Optional, TYPE_CHECKING
 
 import aiosqlite
 from pydantic import ValidationError
@@ -32,6 +38,10 @@ from ..llm.prompts import PromptBuilder
 from ..mcp.artifact_registry import ArtifactRegistry
 from ..models.enums import ReviewDimensionEnum
 from ..models.payloads import ReviewNodePayload
+
+if TYPE_CHECKING:
+    from ..knowledge.memory import KnowledgeContext, KnowledgeMemoryService
+    from ..models.findings import UserAnnotation
 
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
@@ -162,6 +172,36 @@ class TaskOrchestrator:
     def get_task(self, dimension: ReviewDimensionEnum) -> DimensionTask:
         return self._tasks[dimension]
 
+    def add_annotation(
+        self,
+        dimension: ReviewDimensionEnum,
+        annotation: "UserAnnotation",
+    ) -> None:
+        """Append a ``UserAnnotation`` to the in-memory payload for *dimension*.
+
+        Keeps the in-memory payload aligned with annotations persisted in
+        KnowledgeMemory so that ``get_all_payloads()`` always reflects the
+        current annotated state for subsequent Layer 2 runs.
+
+        Parameters
+        ----------
+        dimension:
+            The dimension whose completed payload should be annotated.
+        annotation:
+            The ``UserAnnotation`` to append.
+
+        Raises
+        ------
+        ValueError
+            If the dimension has no completed payload (state != COMPLETE).
+        """
+        task = self._tasks.get(dimension)
+        if task is None or task.payload is None:
+            raise ValueError(
+                f"Cannot annotate dimension {dimension!r}: no completed payload."
+            )
+        task.payload.user_annotations.append(annotation)
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     async def _run_single(self, dimension: ReviewDimensionEnum) -> None:
@@ -185,24 +225,59 @@ def make_dimension_runner(
     config: LLMConfig,
     builder: PromptBuilder,
     registry: ArtifactRegistry,
+    knowledge_service: Optional["KnowledgeMemoryService"] = None,
+    node_id: str = "",
 ) -> Callable[[ReviewDimensionEnum], Awaitable[ReviewNodePayload]]:
     """Return a runner_fn closed over the given config, builder, and registry.
 
     The returned coroutine:
-    1. Builds the (system, user) prompt pair for the dimension.
-    2. Calls ``call_llm()`` (temperature=0.0 enforced internally).
-    3. Validates the JSON response against ``ReviewNodePayload``.
-    4. Returns the validated payload (in-memory only — no DB write here).
+    1. Queries KnowledgeMemory for observations matching the dimension context
+       (when ``knowledge_service`` is provided).
+    2. Builds the (system, user) prompt pair, injecting observations as
+       Contextual Constraints when available.
+    3. Calls ``call_llm()`` (temperature=0.0 enforced internally).
+    4. Validates the JSON response against ``ReviewNodePayload``.
+    5. Returns the validated payload (in-memory only — no DB write here).
+
+    Parameters
+    ----------
+    config:
+        LLM backend configuration.
+    builder:
+        ``PromptBuilder`` instance (uses the active blueprint).
+    registry:
+        Artifact registry providing the proposal content string.
+    knowledge_service:
+        Optional ``KnowledgeMemoryService``.  When provided, prior observations
+        for each dimension are fetched and injected into the system prompt so
+        the engine incorporates learned corrections from previous runs.
+    node_id:
+        Logical context key stored in KnowledgeContext.  Typically the current
+        exploration node id or session identifier.
 
     Raises
     ------
     DimensionValidationError
         If Pydantic validation fails for the LLM response.
     """
+    from ..knowledge.memory import KnowledgeContext
+    from ..models.enums import PhaseEnum
+
     artifact_context = registry.build_context_string()
 
     async def run_dimension(dimension: ReviewDimensionEnum) -> ReviewNodePayload:
-        system, user = builder.build_dimension_prompt(dimension, artifact_context)
+        observations = []
+        if knowledge_service is not None:
+            context = KnowledgeContext(
+                phase=PhaseEnum.DIMENSION_REVIEW,
+                node_id=node_id,
+                dimension=dimension.value,
+            )
+            observations = await knowledge_service.get_observations(context)
+
+        system, user = builder.build_dimension_prompt(
+            dimension, artifact_context, observations
+        )
         llm_response = await call_llm(config, system, user)
         try:
             payload = ReviewNodePayload.model_validate_json(llm_response.content)
