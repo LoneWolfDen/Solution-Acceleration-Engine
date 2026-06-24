@@ -13,7 +13,7 @@ Import order in this module:
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 from textual.message import Message
 
@@ -180,3 +180,19 @@ class AnnotationApplied(Message):
         self.dimension: ReviewDimensionEnum = dimension
         self.amended_value: str = amended_value
         self.rationale: str = rationale
+class ArbitrationStatusChanged(Message):
+    """Posted by ``ContextaApp._run_arbitration()`` on each status transition.
+
+    ``status`` carries the ``ArbitrationStatus`` enum value from
+    ``contexta.pipeline.arbitrator``.  It is typed ``Any`` here so that
+    ``messages.py`` stays free of pipeline-layer imports; the concrete type
+    is enforced at the call site in ``app.py``.
+
+    Consumed by ``ContextaApp.on_arbitration_status_changed()`` which routes
+    the update to ``PipelineView.show_arbitration_status()``.
+    """
+
+    def __init__(self, status: Any, detail: str) -> None:
+        super().__init__()
+        self.status: Any = status
+        self.detail: str = detail

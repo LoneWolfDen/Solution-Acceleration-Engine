@@ -36,7 +36,7 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 from textual.app import ComposeResult
 from textual.containers import ScrollableContainer, Vertical
 from textual.widget import Widget
-from textual.widgets import Label, Static
+from textual.widgets import DataTable, Label, Static
 
 from contexta.models.enums import ReviewDimensionEnum
 from contexta.models.findings import IssueFinding
@@ -118,15 +118,16 @@ class MetadataCluster(Widget):
 
 
 class ReconciliationPanel(Widget):
-    """Displays Layer 2 Arbitrator contradiction summary.
+    """Displays Layer 2 Arbitrator contradiction summary in an interactive table.
 
-    Hidden until ``show_results()`` is called.
+    Hidden until ``show_results()`` is called.  Columns are initialised in
+    ``on_mount()`` so the ``DataTable`` is ready before any data arrives.
     """
 
     DEFAULT_CSS = """
     ReconciliationPanel {
         height: auto;
-        padding: 1 2;
+        padding: 1 2 0 2;
         display: none;
         border-top: solid $warning;
         background: $background-darken-1;
@@ -137,30 +138,36 @@ class ReconciliationPanel(Widget):
     ReconciliationPanel .recon-title {
         text-style: bold;
         color: $warning;
+        margin-bottom: 1;
     }
-    ReconciliationPanel .recon-body {
-        color: $text;
+    #recon-table {
+        height: auto;
+        max-height: 12;
     }
     """
 
     def compose(self) -> ComposeResult:
         yield Static("⚖  Reconciliation Summary", classes="recon-title")
-        yield Static("(no results yet)", id="recon-body", classes="recon-body")
+        yield DataTable(id="recon-table", show_cursor=True)
+
+    def on_mount(self) -> None:
+        table = self.query_one("#recon-table", DataTable)
+        table.add_columns("#", "Dimension A", "Dimension B", "Description")
 
     def show_results(self, contradictions: List[dict]) -> None:
-        """Render the Arbitrator contradiction list and make the panel visible."""
+        """Populate the table with Arbitrator contradictions and reveal the panel."""
+        table = self.query_one("#recon-table", DataTable)
+        table.clear()
+
         if not contradictions:
-            body = "No contradictions detected across all 12 dimensions."
+            table.add_row("—", "(none)", "(none)", "No contradictions detected.")
         else:
-            lines: List[str] = []
             for i, c in enumerate(contradictions, start=1):
                 dim_a = c.get("dimension_a", "?")
                 dim_b = c.get("dimension_b", "?")
                 desc = c.get("description", "")
-                lines.append(f"  {i}. [{dim_a}] ↔ [{dim_b}]: {desc}")
-            body = "\n".join(lines)
+                table.add_row(str(i), dim_a, dim_b, desc)
 
-        self.query_one("#recon-body", Static).update(body)
         self.add_class("-visible")
 
 
@@ -445,6 +452,62 @@ class FindingsAnnotationPanel(Widget):
 
 
 # ── PipelineView ──────────────────────────────────────────────────────────────
+class ArbitrationStatusBar(Widget):
+    """Shows real-time ``ArbitratorEngine`` status below the dimension list.
+
+    Hidden until the first ``update_status()`` call.  Stays visible after
+    ``COMPLETE`` or ``FAILED`` so the outcome is readable without reopening
+    a modal.
+
+    ``status`` is typed ``object`` to keep this widget free of pipeline-layer
+    imports; ``getattr(status, "value", str(status))`` extracts the string
+    value at runtime from any ``ArbitrationStatus`` instance.
+    """
+
+    DEFAULT_CSS = """
+    ArbitrationStatusBar {
+        height: auto;
+        padding: 0 2;
+        display: none;
+        border-top: solid $primary;
+        background: $background-darken-1;
+    }
+    ArbitrationStatusBar.-active {
+        display: block;
+    }
+    ArbitrationStatusBar .arb-label {
+        color: $text;
+        text-style: italic;
+    }
+    ArbitrationStatusBar .arb-label.-processing  { color: $warning; }
+    ArbitrationStatusBar .arb-label.-rate-limited { color: $error;   }
+    ArbitrationStatusBar .arb-label.-complete     { color: $success; }
+    ArbitrationStatusBar .arb-label.-failed       { color: $error;   }
+    """
+
+    _ICONS: Dict[str, str] = {
+        "PROCESSING":   "⏳",
+        "RATE_LIMITED": "⏸",
+        "COMPLETE":     "✓",
+        "FAILED":       "✗",
+    }
+
+    def compose(self) -> ComposeResult:
+        yield Static("", id="arb-status-label", classes="arb-label")
+
+    def update_status(self, status: object, detail: str) -> None:
+        """Reflect the latest ``ArbitrationStatus`` in the label and CSS class."""
+        status_value: str = getattr(status, "value", str(status))
+        icon = self._ICONS.get(status_value, "⚖")
+
+        label = self.query_one("#arb-status-label", Static)
+        label.update(f"{icon}  Arbitration: {status_value} — {detail}")
+
+        for cls in ("-processing", "-rate-limited", "-complete", "-failed"):
+            label.remove_class(cls)
+        label.add_class(f"-{status_value.lower().replace('_', '-')}")
+
+        self.add_class("-active")
 
 
 class PipelineView(Widget):
@@ -496,6 +559,7 @@ class PipelineView(Widget):
                 self._rows[dim] = row
                 yield row
 
+        yield ArbitrationStatusBar(id="arbitration-status-bar")
         yield ReconciliationPanel(id="reconciliation-panel")
         yield FindingsAnnotationPanel(id="findings-panel")
 
@@ -535,6 +599,14 @@ class PipelineView(Widget):
         self, payloads: List["ReviewNodePayload"]
     ) -> None:
         """Populate the FindingsAnnotationPanel from all completed payloads.
+    def show_arbitration_status(self, status: object, detail: str) -> None:
+        """Forward an ArbitrationStatus update to the ArbitrationStatusBar."""
+        self.query_one("#arbitration-status-bar", ArbitrationStatusBar).update_status(
+            status, detail
+        )
+
+    def load_findings(self, findings: List[IssueFinding]) -> None:
+        """Register the current set of IssueFinding objects for navigation.
 
         Call this after all 12 Layer 1 dimensions reach COMPLETE state so
         the annotation panel is populated with AI findings ready for review.
