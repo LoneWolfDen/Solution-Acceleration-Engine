@@ -3,7 +3,6 @@
 Responsibilities
 ----------------
 - Holds the single ``aiosqlite.Connection``, ``ContextaConfig``,
-- Holds the single ``aiosqlite.Connection``, ``ContextaConfig``,
   ``ArtifactRegistry``, and ``PromptBlueprintManager``.
 - Registers ``MainScreen`` as the default screen and ``AdminScreen`` as a named
   screen accessible via ``push_screen("admin")``.
@@ -29,7 +28,6 @@ if TYPE_CHECKING:
     # Only imported for type hints; optional at runtime so that the TUI can
     # be launched in environments where the full pipeline is not yet wired.
     import aiosqlite
-    from contexta.config import ContextaConfig
     from contexta.config import ContextaConfig
     from contexta.tui.widgets.pipeline_view import PipelineView
 
