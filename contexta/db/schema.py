@@ -99,6 +99,28 @@ DDL_STATEMENTS: list[str] = [
     )
     """,
 
+    # ── Reviews ───────────────────────────────────────────────────────────────
+    # Stores a single arbitration run scoped to a Version (Sprint 2).
+    #
+    # Columns:
+    #   version_id            FK → versions.id (provenance anchor).
+    #   persona_prompt        The LLM persona prompt used for this review run.
+    #   user_context_text     Free-text user-supplied context or briefing.
+    #   sme_augmentation_list JSON array of SME knowledge augmentation strings.
+    #   dimension_output      JSON array of the 12-dimension review results
+    #                         (maps to spec field ``12_dimension_output`` — the
+    #                         leading digit is not a valid SQL or Python
+    #                         identifier start, so the column is named
+    #                         ``dimension_output`` throughout).
+    """
+    CREATE TABLE IF NOT EXISTS reviews (
+        id                    TEXT PRIMARY KEY,
+        version_id            TEXT NOT NULL REFERENCES versions(id),
+        persona_prompt        TEXT NOT NULL,
+        user_context_text     TEXT NOT NULL,
+        sme_augmentation_list TEXT NOT NULL DEFAULT '[]',
+        dimension_output      TEXT NOT NULL DEFAULT '[]',
+        created_at            TEXT NOT NULL
     # ── Knowledge Observations ────────────────────────────────────────────────
     # Stores every user annotation (base → amended + rationale) so that the
     # KnowledgeMemoryService can retrieve prior interventions and inject them
