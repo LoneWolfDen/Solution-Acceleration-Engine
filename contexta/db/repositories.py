@@ -21,7 +21,8 @@ import aiosqlite
 from pydantic import ValidationError
 
 from ..models.payloads import ReviewNodePayload
-from .models import BlueprintRow, InsightRow, NodeRow, ObservationRow, ProjectRow
+from .models import BlueprintRow, InsightRow, NodeRow, ProjectRow, ReviewRow, VersionRow, ObservationRow, ProjectRow
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,16 @@ def _row_to_project(row: aiosqlite.Row) -> ProjectRow:
     )
 
 
+def _row_to_version(row: aiosqlite.Row) -> VersionRow:
+    return VersionRow(
+        id=row["id"],
+        project_id=row["project_id"],
+        name=row["name"],
+        description=row["description"],
+        created_at=row["created_at"],
+    )
+
+
 def _row_to_node(row: aiosqlite.Row) -> NodeRow:
     return NodeRow(
         id=row["id"],
@@ -60,6 +71,7 @@ def _row_to_node(row: aiosqlite.Row) -> NodeRow:
         content_markdown=row["content_markdown"] or "",
         created_at=row["created_at"],
         version_tag=row["version_tag"],
+        version_id=row["version_id"],
     )
 
 
@@ -83,6 +95,15 @@ def _row_to_insight(row: aiosqlite.Row) -> InsightRow:
     )
 
 
+def _row_to_review(row: aiosqlite.Row) -> ReviewRow:
+    return ReviewRow(
+        id=row["id"],
+        version_id=row["version_id"],
+        persona_prompt=row["persona_prompt"],
+        user_context_text=row["user_context_text"],
+        sme_augmentation_list=json.loads(row["sme_augmentation_list"] or "[]"),
+        dimension_output=json.loads(row["dimension_output"] or "[]"),
+        created_at=row["created_at"],
 def _row_to_observation(row: aiosqlite.Row) -> ObservationRow:
     return ObservationRow(
         id=row["id"],
@@ -136,6 +157,74 @@ async def list_projects(conn: aiosqlite.Connection) -> List[ProjectRow]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Versions
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def create_version(
+    conn: aiosqlite.Connection,
+    project_id: str,
+    name: str,
+    description: Optional[str] = None,
+) -> VersionRow:
+    """Insert a new version row and return it.
+
+    A Version groups one or more nodes under a named iteration within a
+    Project.  Multiple Versions under a Project enable cross-version
+    comparison (scope.md — Comparison module, status PENDING).
+
+    Args:
+        conn:        Open aiosqlite connection.
+        project_id:  FK → projects.id.
+        name:        Human-readable version label, e.g. "v1.0 — Initial Review".
+        description: Optional free-text notes about this version.
+
+    Returns:
+        ``VersionRow`` representing the newly inserted row.
+    """
+    row_id = _new_id()
+    now = _now_iso()
+    await conn.execute(
+        "INSERT INTO versions (id, project_id, name, description, created_at) VALUES (?, ?, ?, ?, ?)",
+        (row_id, project_id, name, description, now),
+    )
+    await conn.commit()
+    return VersionRow(
+        id=row_id,
+        project_id=project_id,
+        name=name,
+        description=description,
+        created_at=now,
+    )
+
+
+async def get_version(
+    conn: aiosqlite.Connection,
+    version_id: str,
+) -> Optional[VersionRow]:
+    """Return the version with the given id, or None if not found."""
+    cursor = await conn.execute(
+        "SELECT id, project_id, name, description, created_at FROM versions WHERE id = ?",
+        (version_id,),
+    )
+    row = await cursor.fetchone()
+    return _row_to_version(row) if row else None
+
+
+async def list_versions_for_project(
+    conn: aiosqlite.Connection,
+    project_id: str,
+) -> List[VersionRow]:
+    """Return all versions for a project ordered by creation time."""
+    cursor = await conn.execute(
+        "SELECT id, project_id, name, description, created_at "
+        "FROM versions WHERE project_id = ? ORDER BY created_at",
+        (project_id,),
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_version(r) for r in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Nodes
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -148,6 +237,7 @@ async def write_node(
     payload: ReviewNodePayload,
     metadata: dict,
     version_tag: Optional[str] = None,
+    version_id: Optional[str] = None,
 ) -> NodeRow:
     """
     Validate *payload* against ReviewNodePayload, then write a nodes row.
@@ -165,7 +255,8 @@ async def write_node(
         node_name:   Human-readable name for this node.
         payload:     ReviewNodePayload to persist.
         metadata:    Arbitrary metadata dict stored as JSON.
-        version_tag: Optional human-assigned version label.
+        version_tag: Optional legacy human-assigned version label string.
+        version_id:  Optional FK → versions.id — the Version this node belongs to.
 
     Returns:
         NodeRow representing the newly inserted row.
@@ -186,8 +277,8 @@ async def write_node(
         """
         INSERT INTO nodes
             (id, project_id, parent_id, layer_type, node_name,
-             metadata_json, content_markdown, created_at, version_tag)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             metadata_json, content_markdown, created_at, version_tag, version_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row_id,
@@ -199,6 +290,7 @@ async def write_node(
             content_markdown,
             now,
             version_tag,
+            version_id,
         ),
     )
     await conn.commit()
@@ -213,6 +305,7 @@ async def write_node(
         content_markdown=content_markdown,
         created_at=now,
         version_tag=version_tag,
+        version_id=version_id,
     )
 
 
@@ -224,7 +317,7 @@ async def get_node(
     cursor = await conn.execute(
         """
         SELECT id, project_id, parent_id, layer_type, node_name,
-               metadata_json, content_markdown, created_at, version_tag
+               metadata_json, content_markdown, created_at, version_tag, version_id
         FROM nodes WHERE id = ?
         """,
         (node_id,),
@@ -241,7 +334,7 @@ async def list_nodes_for_project(
     cursor = await conn.execute(
         """
         SELECT id, project_id, parent_id, layer_type, node_name,
-               metadata_json, content_markdown, created_at, version_tag
+               metadata_json, content_markdown, created_at, version_tag, version_id
         FROM nodes WHERE project_id = ? ORDER BY created_at
         """,
         (project_id,),
@@ -255,7 +348,7 @@ async def list_all_nodes(conn: aiosqlite.Connection) -> List[NodeRow]:
     cursor = await conn.execute(
         """
         SELECT id, project_id, parent_id, layer_type, node_name,
-               metadata_json, content_markdown, created_at, version_tag
+               metadata_json, content_markdown, created_at, version_tag, version_id
         FROM nodes ORDER BY created_at
         """
     )
@@ -268,6 +361,7 @@ async def fork_node(
     parent_node_id: str,
     new_node_name: str,
     version_tag: Optional[str] = None,
+    version_id: Optional[str] = None,
 ) -> NodeRow:
     """
     Create a new node branched from an existing node.
@@ -280,7 +374,8 @@ async def fork_node(
         conn:           Open aiosqlite connection.
         parent_node_id: id of the node to branch from.
         new_node_name:  Name for the forked node.
-        version_tag:    Optional version label.
+        version_tag:    Optional legacy version label string.
+        version_id:     Optional FK → versions.id for the forked node.
 
     Returns:
         The newly created NodeRow.
@@ -299,8 +394,8 @@ async def fork_node(
         """
         INSERT INTO nodes
             (id, project_id, parent_id, layer_type, node_name,
-             metadata_json, content_markdown, created_at, version_tag)
-        VALUES (?, ?, ?, ?, ?, '{}', '', ?, ?)
+             metadata_json, content_markdown, created_at, version_tag, version_id)
+        VALUES (?, ?, ?, ?, ?, '{}', '', ?, ?, ?)
         """,
         (
             row_id,
@@ -310,6 +405,7 @@ async def fork_node(
             new_node_name,
             now,
             version_tag,
+            version_id,
         ),
     )
     await conn.commit()
@@ -324,6 +420,7 @@ async def fork_node(
         content_markdown="",
         created_at=now,
         version_tag=version_tag,
+        version_id=version_id,
     )
 
 
@@ -515,6 +612,7 @@ async def write_synthesis_node(
     node_name: str,
     report: "ReconciliationReport",  # type: ignore[name-defined]
     version_tag: Optional[str] = None,
+    version_id: Optional[str] = None,
 ) -> NodeRow:
     """Persist a Layer 2 ``ReconciliationReport`` as a synthesis node.
 
@@ -533,7 +631,8 @@ async def write_synthesis_node(
         parent_id:   FK → nodes.id (the Layer 1 exploration node); None if root.
         node_name:   Human-readable label for this synthesis node.
         report:      Validated ``ReconciliationReport`` to persist.
-        version_tag: Optional human-assigned version label.
+        version_tag: Optional legacy version label string.
+        version_id:  Optional FK → versions.id for the synthesis node.
 
     Returns:
         NodeRow representing the newly inserted row.
@@ -558,8 +657,8 @@ async def write_synthesis_node(
         """
         INSERT INTO nodes
             (id, project_id, parent_id, layer_type, node_name,
-             metadata_json, content_markdown, created_at, version_tag)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             metadata_json, content_markdown, created_at, version_tag, version_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row_id,
@@ -571,6 +670,7 @@ async def write_synthesis_node(
             content_markdown,
             now,
             version_tag,
+            version_id,
         ),
     )
     await conn.commit()
@@ -585,6 +685,7 @@ async def write_synthesis_node(
         content_markdown=content_markdown,
         created_at=now,
         version_tag=version_tag,
+        version_id=version_id,
     )
 
 
@@ -626,6 +727,122 @@ async def get_synthesis_report(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Reviews
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def create_review(
+    conn: aiosqlite.Connection,
+    version_id: str,
+    persona_prompt: str,
+    user_context_text: str,
+    sme_augmentation_list: List[str],
+    dimension_output: List[dict],
+) -> ReviewRow:
+    """Insert a new review row and return it.
+
+    A Review records a single arbitration run scoped to a Version.  The
+    ``version_id`` is mandatory — it is the provenance anchor that satisfies
+    the Traceability Standard (scope.md §3): every ReviewRow must be linked
+    to exactly one Version.
+
+    Args:
+        conn:                 Open aiosqlite connection.
+        version_id:           FK → versions.id.  Must reference an existing
+                              version; the FK constraint is enforced by SQLite.
+        persona_prompt:       The LLM persona prompt used for this run.
+        user_context_text:    Free-text user-supplied context or briefing.
+        sme_augmentation_list: List of SME knowledge augmentation strings;
+                              serialised to a JSON array in the DB.
+        dimension_output:     List of dicts representing the 12-dimension
+                              review output; serialised to a JSON array in the
+                              DB (maps to the spec's ``12_dimension_output``
+                              field).
+
+    Returns:
+        ``ReviewRow`` representing the newly inserted row.
+    """
+    row_id = _new_id()
+    now = _now_iso()
+
+    await conn.execute(
+        """
+        INSERT INTO reviews
+            (id, version_id, persona_prompt, user_context_text,
+             sme_augmentation_list, dimension_output, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            row_id,
+            version_id,
+            persona_prompt,
+            user_context_text,
+            json.dumps(sme_augmentation_list),
+            json.dumps(dimension_output),
+            now,
+        ),
+    )
+    await conn.commit()
+
+    return ReviewRow(
+        id=row_id,
+        version_id=version_id,
+        persona_prompt=persona_prompt,
+        user_context_text=user_context_text,
+        sme_augmentation_list=sme_augmentation_list,
+        dimension_output=dimension_output,
+        created_at=now,
+    )
+
+
+async def get_review(
+    conn: aiosqlite.Connection,
+    review_id: str,
+) -> Optional[ReviewRow]:
+    """Return the review with the given id, or None if not found.
+
+    Args:
+        conn:      Open aiosqlite connection.
+        review_id: UUID primary key of the review row to fetch.
+
+    Returns:
+        ``ReviewRow`` if found; ``None`` otherwise.
+    """
+    cursor = await conn.execute(
+        """
+        SELECT id, version_id, persona_prompt, user_context_text,
+               sme_augmentation_list, dimension_output, created_at
+        FROM reviews WHERE id = ?
+        """,
+        (review_id,),
+    )
+    row = await cursor.fetchone()
+    return _row_to_review(row) if row else None
+
+
+async def list_reviews_for_version(
+    conn: aiosqlite.Connection,
+    version_id: str,
+) -> List[ReviewRow]:
+    """Return all reviews for a version ordered by creation time.
+
+    Args:
+        conn:       Open aiosqlite connection.
+        version_id: FK → versions.id — the Version whose reviews to list.
+
+    Returns:
+        List of ``ReviewRow`` objects, oldest first.  Empty list if the
+        version has no reviews.
+    """
+    cursor = await conn.execute(
+        """
+        SELECT id, version_id, persona_prompt, user_context_text,
+               sme_augmentation_list, dimension_output, created_at
+        FROM reviews WHERE version_id = ? ORDER BY created_at
+        """,
+        (version_id,),
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_review(r) for r in rows]
 # Knowledge Observations
 # ─────────────────────────────────────────────────────────────────────────────
 
