@@ -104,3 +104,34 @@ class InsightRow:
     observed_pattern:       str
     frequency_count:        int
     last_updated:           str   # ISO-8601 UTC
+
+
+@dataclass
+class ObservationRow:
+    """Mirrors one row of the knowledge_observations table.
+
+    Each row records a single user intervention: the original AI-produced value,
+    the user's override, and the rationale.  Rows are queried by the
+    KnowledgeMemoryService and injected into subsequent LLM prompts as
+    Contextual Constraints so the engine learns from manual corrections.
+
+    Attributes
+    ----------
+    id:            UUID primary key.
+    phase:         PhaseEnum.value — which pipeline phase produced the original finding.
+    node_id:       Logical context identifier (exploration node id or session id).
+    dimension:     ReviewDimensionEnum.value the finding belongs to.
+    base_value:    The original AI-produced text (summary) at annotation time.
+    amended_value: The user's override text.
+    rationale:     Free-text explanation stored for audit and prompt injection.
+    timestamp:     ISO-8601 UTC string of when the annotation was created.
+    """
+
+    id:            str
+    phase:         str
+    node_id:       str
+    dimension:     str
+    base_value:    str
+    amended_value: str
+    rationale:     str
+    timestamp:     str  # ISO-8601 UTC
