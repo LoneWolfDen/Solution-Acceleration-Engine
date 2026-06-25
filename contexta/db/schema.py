@@ -2,10 +2,13 @@
 contexta/db/schema.py — DDL statements, migration runner, and DB initialisation.
 
 Design constraints enforced here:
-  - nodes table includes version_tag (TEXT) column.
+  - nodes table includes version_tag (TEXT) and version_id (FK → versions) columns.
   - Foreign keys are enabled on every connection.
   - schema_version table tracks the applied migration level.
   - init_database() is the single entry point for all callers.
+
+Data hierarchy (scope.md):
+    Project (Root) → Version (Group) → Node/Artifact (Tagged) → Review → Proposal
 """
 
 from __future__ import annotations
@@ -19,7 +22,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Bump this integer whenever new DDL is added to DDL_STATEMENTS.
-SCHEMA_VERSION = 1
+# v1 → v2: Added ``versions`` table and ``version_id`` FK column on ``nodes``.
+SCHEMA_VERSION = 2
 
 # All DDL statements executed in order during migration.
 # CREATE TABLE IF NOT EXISTS ensures idempotency on re-runs.
@@ -32,6 +36,7 @@ DDL_STATEMENTS: list[str] = [
     """,
 
     # ── Projects ──────────────────────────────────────────────────────────────
+    # Root container in the Project → Version → Artifact hierarchy.
     """
     CREATE TABLE IF NOT EXISTS projects (
         id          TEXT PRIMARY KEY,
@@ -40,8 +45,22 @@ DDL_STATEMENTS: list[str] = [
     )
     """,
 
+    # ── Versions ──────────────────────────────────────────────────────────────
+    # Groups one or more Artifact nodes under a named iteration within a Project.
+    # Enables cross-version comparison (scope.md — Comparison module).
+    """
+    CREATE TABLE IF NOT EXISTS versions (
+        id          TEXT PRIMARY KEY,
+        project_id  TEXT NOT NULL REFERENCES projects(id),
+        name        TEXT NOT NULL,
+        description TEXT,
+        created_at  TEXT NOT NULL
+    )
+    """,
+
     # ── Nodes ─────────────────────────────────────────────────────────────────
-    # version_tag: human-assigned label surfaced during fork / export workflows.
+    # version_tag:  legacy human-assigned string label (backwards compat).
+    # version_id:   FK → versions.id — the Version this node belongs to (nullable).
     """
     CREATE TABLE IF NOT EXISTS nodes (
         id               TEXT PRIMARY KEY,
@@ -52,7 +71,8 @@ DDL_STATEMENTS: list[str] = [
         metadata_json    TEXT NOT NULL DEFAULT '{}',
         content_markdown TEXT NOT NULL DEFAULT '',
         created_at       TEXT NOT NULL,
-        version_tag      TEXT
+        version_tag      TEXT,
+        version_id       TEXT REFERENCES versions(id)
     )
     """,
 
@@ -86,12 +106,19 @@ async def run_migrations(conn: "aiosqlite.Connection") -> None:
     Apply all pending DDL statements and record the current schema version.
 
     Strategy:
-      1. Check whether schema_version table exists and read the stored version.
-      2. If the stored version is already current, skip all DDL (idempotent).
-      3. Otherwise execute every DDL statement in order, then write the version.
+      1. Run ALL DDL statements (CREATE TABLE IF NOT EXISTS — fully idempotent).
+      2. Read the stored schema version.
+      3. If stored version < SCHEMA_VERSION, apply any incremental column
+         migrations and update the version record.
 
-    This is a simple forward-only migration.  For this project scope a full
-    Alembic-style runner is unnecessary overhead.
+    Incremental migrations
+    ----------------------
+    v1 → v2:
+      - ``versions`` table is created by step 1 (idempotent).
+      - ``version_id TEXT REFERENCES versions(id)`` is added to ``nodes`` via
+        ``ALTER TABLE``.  On a fresh install the column already exists from
+        step 1, so the ALTER TABLE will silently fail — this is expected and
+        safe.  On an existing v1 database the ALTER TABLE succeeds.
     """
     # Step 1: run ALL DDL (CREATE TABLE IF NOT EXISTS is idempotent)
     for statement in DDL_STATEMENTS:
@@ -103,6 +130,19 @@ async def run_migrations(conn: "aiosqlite.Connection") -> None:
     stored_version: int = row[0] if row else 0
 
     if stored_version < SCHEMA_VERSION:
+        # ── v0 / v1 → v2 ─────────────────────────────────────────────────────
+        # Add version_id column to nodes for existing databases.
+        # On a fresh install (v0) the DDL above already created the column;
+        # the ALTER TABLE will raise OperationalError which we swallow silently.
+        if stored_version < 2:
+            try:
+                await conn.execute(
+                    "ALTER TABLE nodes ADD COLUMN version_id TEXT REFERENCES versions(id)"
+                )
+            except Exception:
+                pass  # Column already exists on fresh installs — expected.
+
+        # ── Record new schema version ─────────────────────────────────────────
         if stored_version == 0:
             await conn.execute(
                 "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
