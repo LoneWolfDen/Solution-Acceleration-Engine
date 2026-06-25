@@ -104,6 +104,9 @@ def _row_to_review(row: aiosqlite.Row) -> ReviewRow:
         sme_augmentation_list=json.loads(row["sme_augmentation_list"] or "[]"),
         dimension_output=json.loads(row["dimension_output"] or "[]"),
         created_at=row["created_at"],
+    )
+
+
 def _row_to_observation(row: aiosqlite.Row) -> ObservationRow:
     return ObservationRow(
         id=row["id"],
