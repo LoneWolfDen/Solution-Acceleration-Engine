@@ -36,7 +36,11 @@ class MitigationRoutingEnum(str, Enum):
     BOTH_R_AND_A = "Both R&A"
     IGNORED = "Ignored"
 
+
 class PhaseEnum(str, Enum):
-    REVIEW = "Review"
-    RECONCILIATION = "Reconciliation"
-    PROPOSAL = "Proposal"
+    """Pipeline execution phases used to categorise KnowledgeMemory observations."""
+
+    DIMENSION_REVIEW = "DIMENSION_REVIEW"
+    ARBITRATION = "ARBITRATION"
+    LAYER_TWO_SYNTHESIS = "LAYER_TWO_SYNTHESIS"
+    ADVISORY = "ADVISORY"
