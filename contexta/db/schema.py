@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Bump this integer whenever new DDL is added to DDL_STATEMENTS.
 # v1 → v2: Added ``versions`` table and ``version_id`` FK column on ``nodes``.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # All DDL statements executed in order during migration.
 # CREATE TABLE IF NOT EXISTS ensures idempotency on re-runs.
@@ -96,6 +96,47 @@ DDL_STATEMENTS: list[str] = [
         frequency_count        INTEGER NOT NULL DEFAULT 1,
         last_updated           TEXT NOT NULL,
         UNIQUE(client_or_industry_tag, observed_pattern)
+    )
+    """,
+
+    # ── Reviews ───────────────────────────────────────────────────────────────
+    # Stores a single arbitration run scoped to a Version (Sprint 2).
+    #
+    # Columns:
+    #   version_id            FK → versions.id (provenance anchor).
+    #   persona_prompt        The LLM persona prompt used for this review run.
+    #   user_context_text     Free-text user-supplied context or briefing.
+    #   sme_augmentation_list JSON array of SME knowledge augmentation strings.
+    #   dimension_output      JSON array of the 12-dimension review results
+    #                         (maps to spec field ``12_dimension_output`` — the
+    #                         leading digit is not a valid SQL or Python
+    #                         identifier start, so the column is named
+    #                         ``dimension_output`` throughout).
+    """
+    CREATE TABLE IF NOT EXISTS reviews (
+        id                    TEXT PRIMARY KEY,
+        version_id            TEXT NOT NULL REFERENCES versions(id),
+        persona_prompt        TEXT NOT NULL,
+        user_context_text     TEXT NOT NULL,
+        sme_augmentation_list TEXT NOT NULL DEFAULT '[]',
+        dimension_output      TEXT NOT NULL DEFAULT '[]',
+        created_at            TEXT NOT NULL
+    # ── Knowledge Observations ────────────────────────────────────────────────
+    # Stores every user annotation (base → amended + rationale) so that the
+    # KnowledgeMemoryService can retrieve prior interventions and inject them
+    # as Contextual Constraints into subsequent LLM prompts.
+    # No FK on node_id — observations may reference logical context keys that
+    # span projects, enabling cross-project analytics.
+    """
+    CREATE TABLE IF NOT EXISTS knowledge_observations (
+        id            TEXT PRIMARY KEY,
+        phase         TEXT NOT NULL,
+        node_id       TEXT NOT NULL,
+        dimension     TEXT NOT NULL,
+        base_value    TEXT NOT NULL,
+        amended_value TEXT NOT NULL,
+        rationale     TEXT NOT NULL,
+        timestamp     TEXT NOT NULL
     )
     """,
 ]
