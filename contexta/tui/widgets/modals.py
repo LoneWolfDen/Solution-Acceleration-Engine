@@ -349,8 +349,8 @@ class EditFindingModal(_ModalBase):
             self.dismiss(False)
 
     def action_cancel(self) -> None:
-
-# ── ArbitratorErrorModal ──────────────────────────────────────────────────────
+        """Cancel the edit modal without saving."""
+        self.dismiss(False)
 
 class ArbitratorErrorModal(_ModalBase):
     """Display an ``ArbitratorError`` (or any arbitration failure) to the user.
