@@ -21,7 +21,7 @@ import aiosqlite
 from pydantic import ValidationError
 
 from ..models.payloads import ReviewNodePayload
-from .models import BlueprintRow, InsightRow, NodeRow, ProjectRow, ReviewRow, VersionRow, ObservationRow, ProjectRow
+from .models import BlueprintRow, InsightRow, NodeRow, ProjectRow, VersionRow, ObservationRow, ReviewRow
 
 
 logger = logging.getLogger(__name__)
