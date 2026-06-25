@@ -21,7 +21,7 @@ import aiosqlite
 from pydantic import ValidationError
 
 from ..models.payloads import ReviewNodePayload
-from .models import BlueprintRow, InsightRow, NodeRow, ProjectRow, VersionRow
+from .models import BlueprintRow, InsightRow, NodeRow, ProjectRow, VersionRow, ObservationRow, ProjectRow
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +91,19 @@ def _row_to_insight(row: aiosqlite.Row) -> InsightRow:
         observed_pattern=row["observed_pattern"],
         frequency_count=row["frequency_count"],
         last_updated=row["last_updated"],
+    )
+
+
+def _row_to_observation(row: aiosqlite.Row) -> ObservationRow:
+    return ObservationRow(
+        id=row["id"],
+        phase=row["phase"],
+        node_id=row["node_id"],
+        dimension=row["dimension"],
+        base_value=row["base_value"],
+        amended_value=row["amended_value"],
+        rationale=row["rationale"],
+        timestamp=row["timestamp"],
     )
 
 
@@ -700,3 +713,105 @@ async def get_synthesis_report(
         return None
 
     return ReconciliationReport.model_validate(report_data)
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Knowledge Observations
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def write_observation(
+    conn: aiosqlite.Connection,
+    phase: str,
+    node_id: str,
+    dimension: str,
+    base_value: str,
+    amended_value: str,
+    rationale: str,
+) -> ObservationRow:
+    """Persist a single user annotation as a KnowledgeMemory observation.
+
+    Args:
+        conn:          Open aiosqlite connection.
+        phase:         PhaseEnum.value — pipeline phase of the source finding.
+        node_id:       Logical context key (exploration node id or session id).
+        dimension:     ReviewDimensionEnum.value the finding belongs to.
+        base_value:    Original AI-produced text at annotation time.
+        amended_value: User's override text.
+        rationale:     Why the user made this change.
+
+    Returns:
+        ObservationRow representing the newly inserted row.
+    """
+    row_id = _new_id()
+    now = _now_iso()
+    await conn.execute(
+        """
+        INSERT INTO knowledge_observations
+            (id, phase, node_id, dimension, base_value, amended_value, rationale, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (row_id, phase, node_id, dimension, base_value, amended_value, rationale, now),
+    )
+    await conn.commit()
+    return ObservationRow(
+        id=row_id,
+        phase=phase,
+        node_id=node_id,
+        dimension=dimension,
+        base_value=base_value,
+        amended_value=amended_value,
+        rationale=rationale,
+        timestamp=now,
+    )
+
+
+async def get_observations_for_context(
+    conn: aiosqlite.Connection,
+    dimension: Optional[str] = None,
+    phase: Optional[str] = None,
+    limit: int = 10,
+) -> List[ObservationRow]:
+    """Return the most recent KnowledgeMemory observations matching the context.
+
+    Used by KnowledgeMemoryService to fetch prior user interventions before
+    an LLM call so they can be injected as Contextual Constraints.
+
+    Filters are applied with AND logic when provided.  Ordered newest-first
+    and capped at *limit* to avoid context-window bloat.
+
+    Args:
+        conn:      Open aiosqlite connection.
+        dimension: If provided, restrict to observations for this dimension.
+        phase:     If provided, restrict to observations from this phase.
+        limit:     Maximum rows to return (default 10).
+
+    Returns:
+        List of ObservationRow ordered by timestamp DESC.
+    """
+    clauses: list[str] = []
+    params: list[str] = []
+
+    if dimension is not None:
+        clauses.append("dimension = ?")
+        params.append(dimension)
+    if phase is not None:
+        clauses.append("phase = ?")
+        params.append(phase)
+
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(str(limit))
+
+    cursor = await conn.execute(
+        f"""
+        SELECT id, phase, node_id, dimension, base_value, amended_value, rationale, timestamp
+        FROM knowledge_observations
+        {where}
+        ORDER BY timestamp DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_observation(r) for r in rows]
