@@ -85,6 +85,44 @@ class NodeRow:
 
 
 @dataclass
+class ReviewRow:
+    """Mirrors one row of the ``reviews`` table.
+
+    A Review captures a single arbitration run scoped to a Version, tying
+    together the persona prompt, user context, SME augmentations, and the
+    full 12-dimension review output.
+
+    Every ``ReviewRow`` is linked to a ``version_id`` to satisfy the
+    Traceability Standard (scope.md §3): all AI outputs must carry full
+    provenance.
+
+    Attributes:
+        id:                    UUID primary key.
+        version_id:            FK → versions.id — the Version this review
+                               belongs to (provenance anchor).
+        persona_prompt:        The LLM persona prompt used for this review.
+        user_context_text:     Free-text user-supplied context or briefing.
+        sme_augmentation_list: List of SME knowledge augmentation strings
+                               (deserialised from a JSON array in the DB).
+        dimension_output:      The 12-dimension review output, stored as a
+                               list of dicts (deserialised from JSON).
+                               Column name in the DB: ``dimension_output``
+                               (maps to the spec's ``12_dimension_output``
+                               field — Python identifiers cannot start with
+                               a digit).
+        created_at:            ISO-8601 UTC timestamp of review creation.
+    """
+
+    id:                    str
+    version_id:            str          # FK → versions.id (provenance anchor)
+    persona_prompt:        str
+    user_context_text:     str
+    sme_augmentation_list: List[str]    # deserialised from JSON array
+    dimension_output:      List[dict]   # deserialised from JSON (12 dimensions)
+    created_at:            str          # ISO-8601 UTC
+
+
+@dataclass
 class BlueprintRow:
     """Mirrors one row of the prompt_blueprints table."""
 
@@ -104,3 +142,34 @@ class InsightRow:
     observed_pattern:       str
     frequency_count:        int
     last_updated:           str   # ISO-8601 UTC
+
+
+@dataclass
+class ObservationRow:
+    """Mirrors one row of the knowledge_observations table.
+
+    Each row records a single user intervention: the original AI-produced value,
+    the user's override, and the rationale.  Rows are queried by the
+    KnowledgeMemoryService and injected into subsequent LLM prompts as
+    Contextual Constraints so the engine learns from manual corrections.
+
+    Attributes
+    ----------
+    id:            UUID primary key.
+    phase:         PhaseEnum.value — which pipeline phase produced the original finding.
+    node_id:       Logical context identifier (exploration node id or session id).
+    dimension:     ReviewDimensionEnum.value the finding belongs to.
+    base_value:    The original AI-produced text (summary) at annotation time.
+    amended_value: The user's override text.
+    rationale:     Free-text explanation stored for audit and prompt injection.
+    timestamp:     ISO-8601 UTC string of when the annotation was created.
+    """
+
+    id:            str
+    phase:         str
+    node_id:       str
+    dimension:     str
+    base_value:    str
+    amended_value: str
+    rationale:     str
+    timestamp:     str  # ISO-8601 UTC
