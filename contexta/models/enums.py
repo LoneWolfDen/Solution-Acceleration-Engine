@@ -40,4 +40,3 @@ class PhaseEnum(str, Enum):
     REVIEW = "Review"
     RECONCILIATION = "Reconciliation"
     PROPOSAL = "Proposal"
-EOF
