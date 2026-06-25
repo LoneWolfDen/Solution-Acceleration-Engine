@@ -26,7 +26,6 @@ Design contracts
 """
 
 from __future__ import annotations
-
 from typing import List, Optional, TYPE_CHECKING
 
 from ..db.models import BlueprintRow
@@ -317,4 +316,128 @@ def build_synthesis_prompt(
         )
 
     user = "LAYER 1 FINDINGS:\n\n" + "\n\n".join(lines)
+    return system, user
+
+
+
+# ── Proposal prompt templates ─────────────────────────────────────────────────
+
+PROPOSAL_SYSTEM_TEMPLATE = """\
+You are a Project Proposal Synthesis AI. Your task is to generate a concise,
+data-backed project proposal grounded entirely in the provided review findings.
+
+CONFIDENCE MATRIX (Layer 1 dimension scores):
+{confidence_matrix_text}
+
+{erd_directive}
+
+CONCISENESS CONSTRAINT:
+Your output must be project-specific. Include only relevant industry knowledge
+that is directly applicable to the current project context. Do not include
+generic descriptions of SDLC or ITIL phases unless they directly explain a
+risk or mitigation specific to the provided artifacts. Every paragraph of your
+proposal MUST include at least one [ArtifactID:SectionID] traceability
+reference linking your statement to the source material.
+
+OUTPUT FORMAT:
+Respond with a single raw JSON object (no markdown fences) conforming to:
+{schema_json}
+"""
+
+_ERD_DIRECTIVE_TEMPLATE = """\
+MANDATORY EXECUTIVE RISK DISCLOSURE:
+The following dimensions have scored RED. You MUST generate an
+"Executive Risk Disclosure" section as the FIRST section of your proposal.
+Each RED dimension MUST reference specific [ArtifactID:SectionID] citations
+from the source material.
+
+RED dimensions requiring disclosure:
+{red_dimension_list}
+"""
+
+_PROPOSAL_OUTPUT_SCHEMA = """\
+{
+  "proposal_text": "<Markdown proposal — every paragraph contains [ArtifactID:SectionID]>",
+  "executive_risk_disclosure": {
+    "items": [
+      {
+        "dimension": "<ReviewDimensionEnum value>",
+        "confidence": "RED",
+        "summary": "<risk summary>",
+        "citation_refs": ["[ArtifactID:SectionID]"]
+      }
+    ],
+    "directive": "<overall risk directive>"
+  },
+  "diagram_metadata": {
+    "<diagram_id>": {
+      "diagram_id": "<id>",
+      "diagram_type": "<architecture|sequence|deployment>",
+      "title": "<title>",
+      "description": "<description>",
+      "drawio_xml": "<draw.io XML>",
+      "related_dimensions": ["<dimension name>"]
+    }
+  },
+  "download_links": {
+    "<label>": "<relative/path/to/file>"
+  }
+}"""
+
+
+def build_proposal_prompt(
+    confidence_matrix: "ConfidenceMatrix",  # type: ignore[name-defined]
+    artifact_context: str,
+    arbitrator_summary: Optional[str] = None,
+) -> tuple[str, str]:
+    """Return ``(system_prompt, user_prompt)`` for the ProposalEngine LLM call.
+
+    Injects the full ``ConfidenceMatrix`` into the system prompt so the model
+    can reason about per-dimension confidence levels.  When any dimension is
+    RED, a mandatory Executive Risk Disclosure directive is added.
+
+    Parameters
+    ----------
+    confidence_matrix:
+        Built by ``ConfidenceEngine.build_matrix()`` from Layer 1 payloads.
+    artifact_context:
+        Concatenated artifact content produced by
+        ``ArtifactRegistry.build_context_string()``.
+    arbitrator_summary:
+        Optional summary from the Layer 2 arbitrator to provide cross-dimension
+        conflict context.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(system_prompt, user_prompt)``
+    """
+    # Build confidence matrix text block
+    matrix_lines = []
+    for dim, conf in confidence_matrix.scores.items():
+        matrix_lines.append(f"  {dim.value}: {conf.value}")
+    confidence_matrix_text = "\n".join(matrix_lines) if matrix_lines else "  (no scores)"
+
+    # Build ERD directive if any RED dimensions exist
+    if confidence_matrix.has_red:
+        red_list_lines = []
+        for dim in confidence_matrix.red_dimensions:
+            red_list_lines.append(f"  - {dim.value} [RED]")
+        erd_directive = _ERD_DIRECTIVE_TEMPLATE.format(
+            red_dimension_list="\n".join(red_list_lines)
+        )
+    else:
+        erd_directive = ""
+
+    system = PROPOSAL_SYSTEM_TEMPLATE.format(
+        confidence_matrix_text=confidence_matrix_text,
+        erd_directive=erd_directive,
+        schema_json=_PROPOSAL_OUTPUT_SCHEMA,
+    )
+
+    user_parts = ["PROPOSAL ARTIFACTS:\n\n" + artifact_context]
+    if arbitrator_summary:
+        user_parts.append(f"\nARBITRATOR SUMMARY:\n\n{arbitrator_summary}")
+    user = "\n".join(user_parts)
+
     return system, user
