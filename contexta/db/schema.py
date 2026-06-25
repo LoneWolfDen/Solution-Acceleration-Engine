@@ -122,6 +122,22 @@ DDL_STATEMENTS: list[str] = [
         sme_augmentation_list TEXT NOT NULL DEFAULT '[]',
         dimension_output      TEXT NOT NULL DEFAULT '[]',
         created_at            TEXT NOT NULL
+    # ── Knowledge Observations ────────────────────────────────────────────────
+    # Stores every user annotation (base → amended + rationale) so that the
+    # KnowledgeMemoryService can retrieve prior interventions and inject them
+    # as Contextual Constraints into subsequent LLM prompts.
+    # No FK on node_id — observations may reference logical context keys that
+    # span projects, enabling cross-project analytics.
+    """
+    CREATE TABLE IF NOT EXISTS knowledge_observations (
+        id            TEXT PRIMARY KEY,
+        phase         TEXT NOT NULL,
+        node_id       TEXT NOT NULL,
+        dimension     TEXT NOT NULL,
+        base_value    TEXT NOT NULL,
+        amended_value TEXT NOT NULL,
+        rationale     TEXT NOT NULL,
+        timestamp     TEXT NOT NULL
     )
     """,
 ]
