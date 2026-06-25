@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 # Bump this integer whenever new DDL is added to DDL_STATEMENTS.
 # v1 → v2: Added ``versions`` table and ``version_id`` FK column on ``nodes``.
-# v2 → v3: Added ``reviews`` table for ReviewRow persistence (Sprint 2).
 SCHEMA_VERSION = 3
 
 # All DDL statements executed in order during migration.
@@ -183,15 +182,6 @@ async def run_migrations(conn: "aiosqlite.Connection") -> None:
                 )
             except Exception:
                 pass  # Column already exists on fresh installs — expected.
-
-        # ── v2 → v3 ──────────────────────────────────────────────────────────
-        # The ``reviews`` table is fully created by the idempotent DDL in
-        # step 1 above (CREATE TABLE IF NOT EXISTS).  No ALTER TABLE is
-        # required for existing tables.  This block is intentionally a no-op
-        # so the migration runner advances the stored version to 3 without
-        # touching schema that already exists.
-        # (Placeholder reserved for future column additions in v3 patch
-        #  migrations if needed.)
 
         # ── Record new schema version ─────────────────────────────────────────
         if stored_version == 0:
