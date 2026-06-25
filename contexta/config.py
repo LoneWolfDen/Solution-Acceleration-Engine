@@ -114,6 +114,30 @@ class ContextaConfig(BaseSettings):
         return upper
 
 
+    def as_llm_config(self) -> "LLMConfig":
+        """Build an ``LLMConfig`` from this config's LLM settings.
+
+        Maps:
+            ``llm_backend``  → ``LLMConfig.model``   (provider-prefixed, e.g. ``groq/llama3-8b-8192``)
+            ``llm_api_key``  → ``LLMConfig.api_key``
+            ``llm_base_url`` → ``LLMConfig.base_url``
+
+        Returns
+        -------
+        LLMConfig
+            Ready to pass directly to ``ArbitratorEngine`` or ``call_llm()``.
+        """
+        # Local import avoids a circular dependency at module load time
+        # (provider.py does not import config.py, so the cycle is one-way).
+        from .llm.provider import LLMConfig  # noqa: PLC0415
+
+        return LLMConfig(
+            model=self.llm_backend,
+            api_key=self.llm_api_key,
+            base_url=self.llm_base_url,
+        )
+
+
 def load_config() -> ContextaConfig:
     """
     Load and validate application configuration from environment variables.
