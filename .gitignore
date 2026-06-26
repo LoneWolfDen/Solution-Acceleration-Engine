@@ -7,19 +7,5 @@ __pycache__/
 dist/
 build/
 .pytest_cache/
-
-
-# Runtime data directories (created by the app on first run)
 data/
-exports/
-
-# Legacy DB path (old default was project root)
-contexta.db
-
-# Reflex frontend build artifacts
-.web/
-frontend.zip
-
-# Environment / secrets
-.env
-.env.*
+data/
