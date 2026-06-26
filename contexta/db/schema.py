@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 # Bump this integer whenever new DDL is added to DDL_STATEMENTS.
 # v1 → v2: Added ``versions`` table and ``version_id`` FK column on ``nodes``.
-SCHEMA_VERSION = 2
+# v2 → v3: Added ``intelligence_layer`` table for Sprint 6 PromptOptimizer.
+SCHEMA_VERSION = 3
 
 # All DDL statements executed in order during migration.
 # CREATE TABLE IF NOT EXISTS ensures idempotency on re-runs.
@@ -98,6 +99,26 @@ DDL_STATEMENTS: list[str] = [
         UNIQUE(client_or_industry_tag, observed_pattern)
     )
     """,
+
+    # ── Intelligence Layer ────────────────────────────────────────────────────
+    # Stores learned insights produced by the Sprint 6 PromptOptimizer service.
+    # Three insight types are written here:
+    #   CITATION_TREND   — [ArtifactID:SectionID] citation frequency aggregates.
+    #   CONFIDENCE_TREND — ConfidenceMatrix keyed by version_id (per-project).
+    #   PROMPT_DELTA     — Recommended prompt adjustments from gate failures.
+    #
+    # project_id is nullable — NULL represents a global (cross-project) insight.
+    # source_node_id is nullable — aggregated insights span multiple nodes.
+    """
+    CREATE TABLE IF NOT EXISTS intelligence_layer (
+        id             TEXT PRIMARY KEY,
+        project_id     TEXT REFERENCES projects(id),
+        insight_type   TEXT NOT NULL,
+        source_node_id TEXT REFERENCES nodes(id),
+        payload_json   TEXT NOT NULL DEFAULT '{}',
+        created_at     TEXT NOT NULL
+    )
+    """,
 ]
 
 
@@ -141,6 +162,12 @@ async def run_migrations(conn: "aiosqlite.Connection") -> None:
                 )
             except Exception:
                 pass  # Column already exists on fresh installs — expected.
+
+        # ── v2 → v3 ──────────────────────────────────────────────────────────
+        # intelligence_layer is an entirely new table — no column alterations
+        # are needed on existing tables.  The CREATE TABLE IF NOT EXISTS in
+        # step 1 already handles both fresh installs and upgrades idempotently.
+        # Nothing extra to do here.
 
         # ── Record new schema version ─────────────────────────────────────────
         if stored_version == 0:

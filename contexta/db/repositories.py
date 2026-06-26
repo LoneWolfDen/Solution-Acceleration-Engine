@@ -21,7 +21,7 @@ import aiosqlite
 from pydantic import ValidationError
 
 from ..models.payloads import ReviewNodePayload
-from .models import BlueprintRow, InsightRow, NodeRow, ProjectRow, VersionRow
+from .models import BlueprintRow, InsightRow, IntelligenceRow, NodeRow, ProjectRow, VersionRow
 
 logger = logging.getLogger(__name__)
 
@@ -700,3 +700,154 @@ async def get_synthesis_report(
         return None
 
     return ReconciliationReport.model_validate(report_data)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Intelligence Layer  (Sprint 6)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _row_to_intelligence(row: aiosqlite.Row) -> IntelligenceRow:
+    return IntelligenceRow(
+        id=row["id"],
+        project_id=row["project_id"],
+        insight_type=row["insight_type"],
+        source_node_id=row["source_node_id"],
+        payload_json=row["payload_json"] or "{}",
+        created_at=row["created_at"],
+    )
+
+
+async def write_intelligence_record(
+    conn: aiosqlite.Connection,
+    insight_type: str,
+    payload: dict,
+    project_id: Optional[str] = None,
+    source_node_id: Optional[str] = None,
+) -> IntelligenceRow:
+    """Insert a new ``intelligence_layer`` record and return it.
+
+    Args:
+        conn:           Open aiosqlite connection.
+        insight_type:   One of 'CITATION_TREND', 'CONFIDENCE_TREND', 'PROMPT_DELTA'.
+        payload:        Dict to serialise as the ``payload_json`` column.
+        project_id:     FK → projects.id.  None for global insights.
+        source_node_id: FK → nodes.id.  None for multi-node aggregated insights.
+
+    Returns:
+        ``IntelligenceRow`` representing the newly inserted record.
+    """
+    row_id = _new_id()
+    now = _now_iso()
+    payload_json = json.dumps(payload)
+
+    await conn.execute(
+        """
+        INSERT INTO intelligence_layer
+            (id, project_id, insight_type, source_node_id, payload_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (row_id, project_id, insight_type, source_node_id, payload_json, now),
+    )
+    await conn.commit()
+
+    return IntelligenceRow(
+        id=row_id,
+        project_id=project_id,
+        insight_type=insight_type,
+        source_node_id=source_node_id,
+        payload_json=payload_json,
+        created_at=now,
+    )
+
+
+async def get_intelligence_for_project(
+    conn: aiosqlite.Connection,
+    project_id: str,
+) -> List[IntelligenceRow]:
+    """Return all intelligence records for *project_id*, ordered by creation time.
+
+    Args:
+        conn:       Open aiosqlite connection.
+        project_id: FK → projects.id to filter on.
+
+    Returns:
+        List of ``IntelligenceRow`` objects, oldest first.  Empty list if none found.
+    """
+    cursor = await conn.execute(
+        """
+        SELECT id, project_id, insight_type, source_node_id, payload_json, created_at
+        FROM intelligence_layer
+        WHERE project_id = ?
+        ORDER BY created_at
+        """,
+        (project_id,),
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_intelligence(r) for r in rows]
+
+
+async def get_intelligence_global(
+    conn: aiosqlite.Connection,
+) -> List[IntelligenceRow]:
+    """Return all intelligence records with ``project_id IS NULL`` (global insights).
+
+    Args:
+        conn: Open aiosqlite connection.
+
+    Returns:
+        List of ``IntelligenceRow`` objects, oldest first.  Empty list if none found.
+    """
+    cursor = await conn.execute(
+        """
+        SELECT id, project_id, insight_type, source_node_id, payload_json, created_at
+        FROM intelligence_layer
+        WHERE project_id IS NULL
+        ORDER BY created_at
+        """
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_intelligence(r) for r in rows]
+
+
+async def get_intelligence_by_type(
+    conn: aiosqlite.Connection,
+    insight_type: str,
+    project_id: Optional[str] = None,
+) -> List[IntelligenceRow]:
+    """Return intelligence records filtered by *insight_type*, optionally scoped to a project.
+
+    When *project_id* is provided, only records for that project are returned.
+    When *project_id* is ``None``, all records of the given type are returned
+    regardless of project scope (including global records).
+
+    Args:
+        conn:         Open aiosqlite connection.
+        insight_type: One of 'CITATION_TREND', 'CONFIDENCE_TREND', 'PROMPT_DELTA'.
+        project_id:   Optional FK → projects.id.  None = return all matching types.
+
+    Returns:
+        List of ``IntelligenceRow`` objects, oldest first.
+    """
+    if project_id is not None:
+        cursor = await conn.execute(
+            """
+            SELECT id, project_id, insight_type, source_node_id, payload_json, created_at
+            FROM intelligence_layer
+            WHERE insight_type = ? AND project_id = ?
+            ORDER BY created_at
+            """,
+            (insight_type, project_id),
+        )
+    else:
+        cursor = await conn.execute(
+            """
+            SELECT id, project_id, insight_type, source_node_id, payload_json, created_at
+            FROM intelligence_layer
+            WHERE insight_type = ?
+            ORDER BY created_at
+            """,
+            (insight_type,),
+        )
+    rows = await cursor.fetchall()
+    return [_row_to_intelligence(r) for r in rows]
