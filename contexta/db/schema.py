@@ -121,6 +121,9 @@ DDL_STATEMENTS: list[str] = [
         sme_augmentation_list TEXT NOT NULL DEFAULT '[]',
         dimension_output      TEXT NOT NULL DEFAULT '[]',
         created_at            TEXT NOT NULL
+    )
+    """,
+
     # ── Knowledge Observations ────────────────────────────────────────────────
     # Stores every user annotation (base → amended + rationale) so that the
     # KnowledgeMemoryService can retrieve prior interventions and inject them
