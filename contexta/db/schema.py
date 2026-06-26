@@ -14,6 +14,7 @@ Data hierarchy (scope.md):
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -200,6 +201,9 @@ async def init_database(db_path: str) -> "aiosqlite.Connection":
         An open aiosqlite.Connection with migrations applied.
     """
     import aiosqlite  # local import keeps module importable without aiosqlite
+
+    # Ensure the parent directory exists (e.g. ./data/ on local dev).
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
     conn = await aiosqlite.connect(db_path)
     conn.row_factory = aiosqlite.Row
