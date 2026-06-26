@@ -1,0 +1,70 @@
+{
+  "simulation_run": "Run 2 (The Correction)",
+  "step": "Learning",
+  "timestamp": "2026-06-26T10:57:13.319341+00:00",
+  "citation_trend": {
+    "record_id": "23788baa-58d3-4797-816f-51519b79fb2d",
+    "insight_type": "CITATION_TREND",
+    "trends": [
+      {
+        "artifact_id": "/simulation-alpha-v1.md",
+        "section_id": "1-5",
+        "frequency": 12
+      },
+      {
+        "artifact_id": "/simulation-alpha-v2.md",
+        "section_id": "1-5",
+        "frequency": 12
+      }
+    ],
+    "unique_sections_cited": 2
+  },
+  "confidence_matrix": {
+    "record_id": "ba1305ff-54e4-45ec-9312-63d1bb8a5819",
+    "insight_type": "CONFIDENCE_TREND",
+    "project_id": "df7532bc-8905-4fac-8686-1147afe9a5e9",
+    "version_order": [
+      "aeb238f6-7bce-411f-8126-c55063bdf0ef",
+      "bfa3f1bc-8970-417b-82fd-3334712a5cef"
+    ],
+    "matrix": {
+      "aeb238f6-7bce-411f-8126-c55063bdf0ef": {
+        "Intent": "AMBER",
+        "Scope": "AMBER",
+        "Ownership": "AMBER",
+        "Delivery": "AMBER",
+        "Timeline": "AMBER",
+        "Architecture": "RED",
+        "NFR": "RED",
+        "Resource": "AMBER",
+        "Risk": "RED",
+        "Commercial": "AMBER",
+        "Language": "AMBER",
+        "Consistency": "AMBER"
+      },
+      "bfa3f1bc-8970-417b-82fd-3334712a5cef": {
+        "Intent": "GREEN",
+        "Scope": "GREEN",
+        "Ownership": "GREEN",
+        "Delivery": "GREEN",
+        "Timeline": "GREEN",
+        "Architecture": "GREEN",
+        "NFR": "GREEN",
+        "Resource": "GREEN",
+        "Risk": "AMBER",
+        "Commercial": "GREEN",
+        "Language": "GREEN",
+        "Consistency": "GREEN"
+      }
+    }
+  },
+  "prompt_delta": {
+    "record_id": "42c71d69-0746-4177-9c78-ebe7dd7c7bea",
+    "insight_type": "PROMPT_DELTA",
+    "gate_failures": [],
+    "delta_json": {},
+    "base_prompt_length": 187,
+    "applied_to_blueprint_id": "fe8e96d8-820b-4751-964b-7048b2b2f312",
+    "adjustments_count": 0
+  }
+}
