@@ -1,0 +1,31 @@
+{
+  "simulation_run": "Run 1 (The Gap)",
+  "step": "Ingestion",
+  "timestamp": "2026-06-26T10:57:13.283334+00:00",
+  "project": {
+    "id": "df7532bc-8905-4fac-8686-1147afe9a5e9",
+    "name": "Simulation-Alpha",
+    "global_tags": [
+      "#FinancialServices",
+      "#Security",
+      "#PCI-DSS"
+    ]
+  },
+  "version": {
+    "id": "aeb238f6-7bce-411f-8126-c55063bdf0ef",
+    "name": "v1 \u2014 Initial Review (The Gap)",
+    "description": "First review pass. Security section absent \u2014 expected to produce Veto."
+  },
+  "artifact": {
+    "file_path": "/simulation-alpha-v1.md",
+    "uri": "file:///simulation-alpha-v1.md",
+    "line_count": 62,
+    "content_preview": "# Simulation-Alpha \u2014 Version 1: Initial Proposal (The Gap)\n\n## 1. Project Overview\n\nSimulation-Alpha is an enterprise-grade financial data processing platform\nto be delivered over 18 months. The syste..."
+  },
+  "blueprint": {
+    "id": "fe8e96d8-820b-4751-964b-7048b2b2f312",
+    "name": "Simulation Blueprint",
+    "version": "1.0.0",
+    "is_active": false
+  }
+}
