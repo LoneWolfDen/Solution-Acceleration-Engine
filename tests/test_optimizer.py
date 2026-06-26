@@ -29,7 +29,7 @@ Section 4 — PromptDelta
 
 Section 5 — DB / Repository layer
   - intelligence_layer table is created by init_database().
-  - SCHEMA_VERSION is 4.
+  - SCHEMA_VERSION is 5.
   - write_intelligence_record() inserts and returns a correct IntelligenceRow.
   - project_id=None (global) and project_id=<id> (scoped) round-trips.
   - get_intelligence_for_project() filters by project only.
@@ -769,7 +769,7 @@ async def test_prompt_delta_run_global_has_null_project_id(db) -> None:
 @pytest.mark.asyncio
 async def test_schema_version_is_current(db) -> None:
     """SCHEMA_VERSION constant must match what is stored in the DB."""
-    assert SCHEMA_VERSION == 4
+    assert SCHEMA_VERSION == 5
     cursor = await db.execute("SELECT version FROM schema_version LIMIT 1")
     row = await cursor.fetchone()
     assert row is not None
