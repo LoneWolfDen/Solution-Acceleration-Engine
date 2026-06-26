@@ -1,1 +1,1 @@
-"""Pipeline orchestration — dimension runner, arbitrator, advisor, scope policy."""
+"""Pipeline orchestration — dimension runner, arbitrator, advisor, scope policy, optimizer."""
