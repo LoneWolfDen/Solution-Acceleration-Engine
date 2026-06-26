@@ -599,6 +599,16 @@ class PipelineView(Widget):
         self, payloads: List["ReviewNodePayload"]
     ) -> None:
         """Populate the FindingsAnnotationPanel from all completed payloads.
+
+        Parameters
+        ----------
+        payloads:
+            All completed ``ReviewNodePayload`` objects from the orchestrator.
+        """
+        self.query_one("#findings-panel", FindingsAnnotationPanel).load_findings(
+            payloads
+        )
+
     def show_arbitration_status(self, status: object, detail: str) -> None:
         """Forward an ArbitrationStatus update to the ArbitrationStatusBar."""
         self.query_one("#arbitration-status-bar", ArbitrationStatusBar).update_status(
