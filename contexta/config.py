@@ -7,10 +7,15 @@ raise ConfigError immediately so the TUI can display a fatal error and halt.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Resolved once at import time so all callers get a consistent value.
+# contexta/config.py lives one level below the project root.
+_PROJECT_ROOT: Path = Path(__file__).parents[1]
 
 
 class ConfigError(Exception):
@@ -44,8 +49,8 @@ class ContextaConfig(BaseSettings):
 
     # ── Optional with defaults ────────────────────────────────────────────────
 
-    db_path: str = "/data/contexta.db"       # CONTEXTA_DB_PATH
-    export_path: str = "/exports"            # CONTEXTA_EXPORT_PATH
+    db_path: str = str(_PROJECT_ROOT / "data" / "contexta.db")  # CONTEXTA_DB_PATH
+    export_path: str = str(_PROJECT_ROOT / "exports")           # CONTEXTA_EXPORT_PATH
     llm_api_key: Optional[str] = None        # CONTEXTA_LLM_API_KEY
     llm_base_url: Optional[str] = None       # CONTEXTA_LLM_BASE_URL
     log_level: str = "WARNING"               # CONTEXTA_LOG_LEVEL
@@ -55,10 +60,6 @@ class ContextaConfig(BaseSettings):
 
     # ── Rate limiting ─────────────────────────────────────────────────────────
     llm_request_delay_seconds: float = 2.5   # CONTEXTA_LLM_REQUEST_DELAY_SECONDS
-
-    # ── Unified Toggle — MVP configuration path ───────────────────────────────
-    execution_mode: str = "UNIFIED"          # CONTEXTA_EXECUTION_MODE
-
 
     @field_validator("llm_backend")
     @classmethod
