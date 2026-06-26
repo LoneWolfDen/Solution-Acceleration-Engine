@@ -17,6 +17,7 @@ from .components.layout import layout
 from .state import AppState
 
 
+@rx.page(route="/", on_load=AppState.load_projects, title="Contexta")
 def index() -> rx.Component:
     """Root page component — delegates entirely to the layout shell."""
     return layout()
@@ -32,12 +33,4 @@ app = rx.App(
         gray_color="slate",
         radius="medium",
     ),
-)
-
-app.add_page(
-    index,
-    route="/",
-    title="Contexta",
-    description="Solution Validation Pipeline",
-    on_load=AppState.load_projects,
 )
