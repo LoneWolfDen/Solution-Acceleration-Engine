@@ -194,6 +194,8 @@ DDL_STATEMENTS: list[str] = [
     CREATE TABLE IF NOT EXISTS app_config (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL DEFAULT ''
+    )
+    """,
     # ── Reviews ───────────────────────────────────────────────────────────────
     # Stores a single arbitration run scoped to a Version.
     # ── Reviews ───────────────────────────────────────────────────────────────
@@ -244,24 +246,24 @@ DDL_STATEMENTS: list[str] = [
 
 
 async def run_migrations(conn: "aiosqlite.Connection") -> None:
-    """
-    Apply all pending DDL statements and record the current schema version.
+    
+    #Apply all pending DDL statements and record the current schema version.
 
-    Strategy:
-      1. Run ALL DDL statements (CREATE TABLE IF NOT EXISTS — fully idempotent).
-      2. Read the stored schema version.
-      3. If stored version < SCHEMA_VERSION, apply any incremental column
-         migrations and update the version record.
+    #Strategy:
+    #  1. Run ALL DDL statements (CREATE TABLE IF NOT EXISTS — fully idempotent).
+    #  2. Read the stored schema version.
+    #  3. If stored version < SCHEMA_VERSION, apply any incremental column
+    #     migrations and update the version record.
 
-    Incremental migrations
-    ----------------------
-    v1 → v2:
-      - ``versions`` table is created by step 1 (idempotent).
-      - ``version_id TEXT REFERENCES versions(id)`` is added to ``nodes`` via
-        ``ALTER TABLE``.  On a fresh install the column already exists from
-        step 1, so the ALTER TABLE will silently fail — this is expected and
-        safe.  On an existing v1 database the ALTER TABLE succeeds.
-    """
+    #Incremental migrations
+    #----------------------
+    #v1 → v2:
+    #  - ``versions`` table is created by step 1 (idempotent).
+    #  - ``version_id TEXT REFERENCES versions(id)`` is added to ``nodes`` via
+    #    ``ALTER TABLE``.  On a fresh install the column already exists from
+    #    step 1, so the ALTER TABLE will silently fail — this is expected and
+    #    safe.  On an existing v1 database the ALTER TABLE succeeds.
+    
     # Step 1: run ALL DDL (CREATE TABLE IF NOT EXISTS is idempotent)
     for statement in DDL_STATEMENTS:
         await conn.execute(statement)
