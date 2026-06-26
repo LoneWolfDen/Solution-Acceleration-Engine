@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 # Bump this integer whenever new DDL is added to DDL_STATEMENTS.
 # v1 → v2: Added ``versions`` table and ``version_id`` FK column on ``nodes``.
 # v2 → v3: Added ``intelligence_layer`` table for Sprint 6 PromptOptimizer.
-SCHEMA_VERSION = 3
+# v3 → v4: Added ``reviews`` and ``knowledge_observations`` tables for Knowledge Memory.
+SCHEMA_VERSION = 4
 
 # All DDL statements executed in order during migration.
 # CREATE TABLE IF NOT EXISTS ensures idempotency on re-runs.
@@ -119,6 +120,46 @@ DDL_STATEMENTS: list[str] = [
         created_at     TEXT NOT NULL
     )
     """,
+
+    # ── Reviews ───────────────────────────────────────────────────────────────
+    # Stores a single arbitration run scoped to a Version.
+    #
+    # Columns:
+    #   version_id            FK → versions.id (provenance anchor).
+    #   persona_prompt        The LLM persona prompt used for this review run.
+    #   user_context_text     Free-text user-supplied context or briefing.
+    #   sme_augmentation_list JSON array of SME knowledge augmentation strings.
+    #   dimension_output      JSON array of the 12-dimension review results.
+    """
+    CREATE TABLE IF NOT EXISTS reviews (
+        id                    TEXT PRIMARY KEY,
+        version_id            TEXT NOT NULL REFERENCES versions(id),
+        persona_prompt        TEXT NOT NULL,
+        user_context_text     TEXT NOT NULL,
+        sme_augmentation_list TEXT NOT NULL DEFAULT '[]',
+        dimension_output      TEXT NOT NULL DEFAULT '[]',
+        created_at            TEXT NOT NULL
+    )
+    """,
+
+    # ── Knowledge Observations ────────────────────────────────────────────────
+    # Stores every user annotation (base → amended + rationale) so that the
+    # KnowledgeMemoryService can retrieve prior interventions and inject them
+    # as Contextual Constraints into subsequent LLM prompts.
+    # No FK on node_id — observations may reference logical context keys that
+    # span projects, enabling cross-project analytics.
+    """
+    CREATE TABLE IF NOT EXISTS knowledge_observations (
+        id            TEXT PRIMARY KEY,
+        phase         TEXT NOT NULL,
+        node_id       TEXT NOT NULL,
+        dimension     TEXT NOT NULL,
+        base_value    TEXT NOT NULL,
+        amended_value TEXT NOT NULL,
+        rationale     TEXT NOT NULL,
+        timestamp     TEXT NOT NULL
+    )
+    """,
 ]
 
 
@@ -167,6 +208,11 @@ async def run_migrations(conn: "aiosqlite.Connection") -> None:
         # intelligence_layer is an entirely new table — no column alterations
         # are needed on existing tables.  The CREATE TABLE IF NOT EXISTS in
         # step 1 already handles both fresh installs and upgrades idempotently.
+        # Nothing extra to do here.
+
+        # ── v3 → v4 ──────────────────────────────────────────────────────────
+        # reviews and knowledge_observations are entirely new tables — no
+        # column alterations needed.  Handled idempotently by step 1 above.
         # Nothing extra to do here.
 
         # ── Record new schema version ─────────────────────────────────────────
