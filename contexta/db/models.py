@@ -217,9 +217,6 @@ class ReviewRow:
 @dataclass
 class ObservationRow:
     """Mirrors one row of the ``knowledge_observations`` table.
-class ObservationRow:
-    """Mirrors one row of the knowledge_observations table.
-
     Each row records a single user intervention: the original AI-produced value,
     the user's override, and the rationale.  Rows are queried by the
     KnowledgeMemoryService and injected into subsequent LLM prompts as
