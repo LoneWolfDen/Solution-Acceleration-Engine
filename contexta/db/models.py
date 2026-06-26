@@ -145,6 +145,78 @@ class InsightRow:
 
 
 @dataclass
+class IntelligenceRow:
+    """Mirrors one row of the ``intelligence_layer`` table.
+
+    Stores learned insights produced by the Sprint 6 PromptOptimizer service.
+    Three insight types are persisted here:
+
+    CITATION_TREND
+        [ArtifactID:SectionID] citation usage frequencies derived from
+        Layer 1 exploration NodeRows.
+
+    CONFIDENCE_TREND
+        ConfidenceMatrix keyed by version_id, scoped per-project.
+        Enables cross-version trend analysis for a specific project.
+
+    PROMPT_DELTA
+        Recommended prompt adjustments derived from JudgeValidationReport
+        gate failures compared against the active BasePersona prompt.
+
+    Attributes:
+        id:             UUID primary key.
+        insight_type:   One of 'CITATION_TREND', 'CONFIDENCE_TREND', 'PROMPT_DELTA'.
+        payload_json:   Raw JSON string containing the insight payload.
+        created_at:     ISO-8601 UTC timestamp of record creation.
+        project_id:     FK → projects.id.  None for global (cross-project) insights.
+        source_node_id: FK → nodes.id.  None for multi-node aggregated insights.
+    """
+
+    id:             str
+    insight_type:   str
+    payload_json:   str            # raw JSON string
+    created_at:     str            # ISO-8601 UTC
+    project_id:     Optional[str] = None   # nullable — None = global insight
+    source_node_id: Optional[str] = None   # nullable — multi-node derivations
+
+
+@dataclass
+class ReviewRow:
+    """Mirrors one row of the ``reviews`` table.
+
+    A Review captures a single arbitration run scoped to a Version, tying
+    together the persona prompt, user context, SME augmentations, and the
+    full 12-dimension review output.
+
+    Every ``ReviewRow`` is linked to a ``version_id`` to satisfy the
+    Traceability Standard (scope.md §3): all AI outputs must carry full
+    provenance.
+
+    Attributes:
+        id:                    UUID primary key.
+        version_id:            FK → versions.id — the Version this review
+                               belongs to (provenance anchor).
+        persona_prompt:        The LLM persona prompt used for this review.
+        user_context_text:     Free-text user-supplied context or briefing.
+        sme_augmentation_list: List of SME knowledge augmentation strings
+                               (deserialised from a JSON array in the DB).
+        dimension_output:      The 12-dimension review output, stored as a
+                               list of dicts (deserialised from JSON).
+        created_at:            ISO-8601 UTC timestamp of review creation.
+    """
+
+    id:                    str
+    version_id:            str          # FK → versions.id (provenance anchor)
+    persona_prompt:        str
+    user_context_text:     str
+    sme_augmentation_list: List[str]    # deserialised from JSON array
+    dimension_output:      List[dict]   # deserialised from JSON (12 dimensions)
+    created_at:            str          # ISO-8601 UTC
+
+
+@dataclass
+class ObservationRow:
+    """Mirrors one row of the ``knowledge_observations`` table.
 class ObservationRow:
     """Mirrors one row of the knowledge_observations table.
 
