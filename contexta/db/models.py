@@ -104,3 +104,39 @@ class InsightRow:
     observed_pattern:       str
     frequency_count:        int
     last_updated:           str   # ISO-8601 UTC
+
+
+@dataclass
+class IntelligenceRow:
+    """Mirrors one row of the ``intelligence_layer`` table.
+
+    Stores learned insights produced by the Sprint 6 PromptOptimizer service.
+    Three insight types are persisted here:
+
+    CITATION_TREND
+        [ArtifactID:SectionID] citation usage frequencies derived from
+        Layer 1 exploration NodeRows.
+
+    CONFIDENCE_TREND
+        ConfidenceMatrix keyed by version_id, scoped per-project.
+        Enables cross-version trend analysis for a specific project.
+
+    PROMPT_DELTA
+        Recommended prompt adjustments derived from JudgeValidationReport
+        gate failures compared against the active BasePersona prompt.
+
+    Attributes:
+        id:             UUID primary key.
+        insight_type:   One of 'CITATION_TREND', 'CONFIDENCE_TREND', 'PROMPT_DELTA'.
+        payload_json:   Raw JSON string containing the insight payload.
+        created_at:     ISO-8601 UTC timestamp of record creation.
+        project_id:     FK → projects.id.  None for global (cross-project) insights.
+        source_node_id: FK → nodes.id.  None for multi-node aggregated insights.
+    """
+
+    id:             str
+    insight_type:   str
+    payload_json:   str            # raw JSON string
+    created_at:     str            # ISO-8601 UTC
+    project_id:     Optional[str] = None   # nullable — None = global insight
+    source_node_id: Optional[str] = None   # nullable — multi-node derivations
