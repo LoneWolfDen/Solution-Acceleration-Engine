@@ -14,6 +14,7 @@ Data hierarchy (scope.md):
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -325,10 +326,34 @@ async def run_migrations(conn: "aiosqlite.Connection") -> None:
         logger.debug("Database schema already at version %d.", stored_version)
 
 
+async def seed_data(conn: "aiosqlite.Connection") -> None:
+    """
+    Insert a Demo Project if the projects table is empty.
+
+    Called by init_database() after migrations so that a fresh install always
+    has at least one project for the UI to display.  Skipped when the table
+    already contains rows (i.e. on every subsequent startup).
+    """
+    cursor = await conn.execute("SELECT COUNT(*) FROM projects")
+    row = await cursor.fetchone()
+    count: int = row[0] if row else 0
+
+    if count == 0:
+        project_id = str(uuid.uuid4())
+        await conn.execute(
+            "INSERT INTO projects (id, name, global_tags) VALUES (?, ?, ?)",
+            (project_id, "Demo Project", '["demo"]'),
+        )
+        await conn.commit()
+        logger.info("Seeded Demo Project (id=%s).", project_id)
+    else:
+        logger.debug("projects table non-empty (%d rows) — skipping seed.", count)
+
+
 async def init_database(db_path: str) -> "aiosqlite.Connection":
     """
-    Open an aiosqlite connection, enable foreign-key enforcement, and run
-    migrations.  Returns the open connection for use throughout the application.
+    Open an aiosqlite connection, enable foreign-key enforcement, run
+    migrations, and seed initial data if the database is empty.
 
     The caller is responsible for closing the connection on shutdown.
 
@@ -337,12 +362,16 @@ async def init_database(db_path: str) -> "aiosqlite.Connection":
                  if it does not exist.
 
     Returns:
-        An open aiosqlite.Connection with migrations applied.
+        An open aiosqlite.Connection with migrations and seed data applied.
     """
     import aiosqlite  # local import keeps module importable without aiosqlite
+
+    # Ensure the parent directory exists (e.g. ./data/ on local dev).
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
     conn = await aiosqlite.connect(db_path)
     conn.row_factory = aiosqlite.Row
     await conn.execute("PRAGMA foreign_keys = ON")
     await run_migrations(conn)
+    await seed_data(conn)
     return conn
