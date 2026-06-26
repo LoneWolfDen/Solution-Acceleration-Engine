@@ -1,125 +1,238 @@
 """
-contexta/api/__init__.py — FastAPI application factory.
+contexta/api/__init__.py — FastAPI application and route handlers.
 
-Entry point:  uvicorn contexta.api:app --host 0.0.0.0 --port 8000
+Provides a REST API over the Contexta data layer for the Reflex web frontend.
+All database access delegates to contexta.db.repositories; this module stays
+thin (validation, mapping, HTTP semantics only).
 
-Architecture:
-  - Single aiosqlite connection opened at startup via lifespan and stored on
-    app.state.db.  All route handlers receive it via Depends(get_db).
-  - Global exception handlers ensure every error response carries the
-    standardised { error: str } envelope, never FastAPI's default { detail }.
-  - All routers are mounted under /api for clean namespacing.
+The app is intentionally decoupled from ContextaConfig: it only needs the DB
+path, which it reads directly from the CONTEXTA_DB_PATH environment variable
+(falling back to the same project-relative default used by config.py).  This
+means the API server can start without CONTEXTA_LLM_BACKEND being set — the
+LLM backend is only required when running the pipeline via the TUI.
+
+Run with:
+    uvicorn contexta.api:app --host 0.0.0.0 --port 8000
 """
 
 from __future__ import annotations
 
-import logging
+import json
+import os
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from pathlib import Path
+from typing import Any, AsyncGenerator
 
-from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
+import aiosqlite
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from contexta.api.config import load_api_config
-from contexta.db.schema import init_database
+from ..db import repositories as repo
+from ..db.schema import init_database
+from .schemas import (
+    NodeDetailResponse,
+    NodeSummaryResponse,
+    ProjectDetailResponse,
+    ProjectResponse,
+    VersionResponse,
+)
 
-logger = logging.getLogger(__name__)
+# ── DB path resolution ────────────────────────────────────────────────────────
+# Mirrors the logic in config.py so that both entry points resolve to the same
+# default without requiring ContextaConfig (which demands LLM_BACKEND).
+_PROJECT_ROOT: Path = Path(__file__).parents[2]
+_DEFAULT_DB_PATH: str = str(_PROJECT_ROOT / "data" / "contexta.db")
+_DB_PATH: str = os.environ.get("CONTEXTA_DB_PATH", _DEFAULT_DB_PATH)
 
 
-# ─── Lifespan ─────────────────────────────────────────────────────────────────
-
+# ── Lifespan: one shared connection for the lifetime of the process ───────────
 @asynccontextmanager
-async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
-    """Open the DB connection on startup; close it on shutdown."""
-    config = load_api_config()
-    logging.basicConfig(
-        level=getattr(logging, config.log_level, logging.INFO),
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    )
-    logger.info("SAE Web API starting — DB: %s", config.db_path)
-    conn = await init_database(config.db_path)
-    application.state.db = conn
-    try:
-        yield
-    finally:
-        logger.info("SAE Web API shutting down — closing DB connection.")
-        await conn.close()
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    """Open the DB on startup; close it cleanly on shutdown."""
+    app.state.db = await init_database(_DB_PATH)
+    yield
+    await app.state.db.close()
 
 
-# ─── App ──────────────────────────────────────────────────────────────────────
-
+# ── App setup ─────────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="Solution Acceleration Engine API",
-    version="1.0.0",
-    description=(
-        "REST API for the Solution-Acceleration-Engine web UI. "
-        "Every response includes an `error` field: null on success, "
-        "a human-readable string on failure."
-    ),
+    title="Contexta API",
+    version="0.1.0",
+    description="REST API for the Contexta solution validation pipeline.",
     lifespan=lifespan,
 )
 
-
-# ─── Exception handlers ───────────────────────────────────────────────────────
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("Unhandled error on %s %s", request.method, request.url)
-    return JSONResponse(
-        status_code=500,
-        content={"error": f"Internal server error: {type(exc).__name__}: {exc}"},
-    )
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
-    messages = "; ".join(
-        f"{'.'.join(str(l) for l in e['loc'])}: {e['msg']}" for e in exc.errors()
-    )
-    return JSONResponse(
-        status_code=422,
-        content={"error": f"Validation error: {messages}"},
-    )
+# Permissive CORS for local dev — the Reflex frontend runs on a different port.
+# Harden to specific origins during the Security milestone.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
-# HTTPException handler — converts { detail } → { error }
-from fastapi.exceptions import HTTPException as FastAPIHTTPException  # noqa: E402
-
-
-@app.exception_handler(FastAPIHTTPException)
+# ── Consistent error envelope ─────────────────────────────────────────────────
+# All HTTP errors return {"error": "..."} so the frontend toast system has a
+# single key to check regardless of status code.
+@app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(
-    request: Request, exc: FastAPIHTTPException
+    request: Request,
+    exc: StarletteHTTPException,
 ) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": exc.detail},
+        content={"error": str(exc.detail)},
     )
 
 
-# ─── Routers ──────────────────────────────────────────────────────────────────
+# ── Dependency: yields the shared DB connection ───────────────────────────────
+async def get_db(request: Request) -> aiosqlite.Connection:
+    return request.app.state.db
 
-from contexta.api.routers import (  # noqa: E402
-    admin,
-    artifacts,
-    projects,
-    proposals,
-    reviews,
-    versions,
+
+# ── Routes ────────────────────────────────────────────────────────────────────
+
+@app.get("/api/health", tags=["system"])
+async def health() -> dict[str, str]:
+    """Liveness probe — confirms the API process is running."""
+    return {"status": "ok", "version": "0.1.0"}
+
+
+@app.get("/api/projects", response_model=list[ProjectResponse], tags=["projects"])
+async def list_projects(
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> list[ProjectResponse]:
+    """Return all projects ordered by insertion time."""
+    rows = await repo.list_projects(conn)
+    return [
+        ProjectResponse(id=r.id, name=r.name, global_tags=r.global_tags)
+        for r in rows
+    ]
+
+
+@app.get(
+    "/api/projects/{project_id}",
+    response_model=ProjectDetailResponse,
+    tags=["projects"],
 )
+async def get_project(
+    project_id: str,
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> ProjectDetailResponse:
+    """Return a project with all its versions and node summaries."""
+    project = await repo.get_project(conn, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{project_id}' not found.",
+        )
 
-app.include_router(projects.router, prefix="/api")
-app.include_router(versions.router, prefix="/api")
-app.include_router(artifacts.router, prefix="/api")
-app.include_router(reviews.router, prefix="/api")
-app.include_router(proposals.router, prefix="/api")
-app.include_router(admin.router, prefix="/api")
+    versions = await repo.list_versions_for_project(conn, project_id)
+    nodes = await repo.list_nodes_for_project(conn, project_id)
+
+    return ProjectDetailResponse(
+        id=project.id,
+        name=project.name,
+        global_tags=project.global_tags,
+        versions=[
+            VersionResponse(
+                id=v.id,
+                project_id=v.project_id,
+                name=v.name,
+                description=v.description,
+                created_at=v.created_at,
+            )
+            for v in versions
+        ],
+        nodes=[
+            NodeSummaryResponse(
+                id=n.id,
+                project_id=n.project_id,
+                parent_id=n.parent_id,
+                layer_type=n.layer_type,
+                node_name=n.node_name,
+                created_at=n.created_at,
+                version_tag=n.version_tag,
+                version_id=n.version_id,
+            )
+            for n in nodes
+        ],
+    )
 
 
-# ─── Health check ─────────────────────────────────────────────────────────────
+@app.get(
+    "/api/projects/{project_id}/nodes",
+    response_model=list[NodeSummaryResponse],
+    tags=["nodes"],
+)
+async def list_nodes(
+    project_id: str,
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> list[NodeSummaryResponse]:
+    """Return all node summaries for a project."""
+    project = await repo.get_project(conn, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Project '{project_id}' not found.",
+        )
 
-@app.get("/", include_in_schema=False)
-async def root() -> dict:
-    return {"status": "ok", "service": "Solution Acceleration Engine API", "error": None}
+    nodes = await repo.list_nodes_for_project(conn, project_id)
+    return [
+        NodeSummaryResponse(
+            id=n.id,
+            project_id=n.project_id,
+            parent_id=n.parent_id,
+            layer_type=n.layer_type,
+            node_name=n.node_name,
+            created_at=n.created_at,
+            version_tag=n.version_tag,
+            version_id=n.version_id,
+        )
+        for n in nodes
+    ]
+
+
+@app.get(
+    "/api/nodes/{node_id}",
+    response_model=NodeDetailResponse,
+    tags=["nodes"],
+)
+async def get_node(
+    node_id: str,
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> NodeDetailResponse:
+    """Return full node detail including content and parsed metadata."""
+    node = await repo.get_node(conn, node_id)
+    if node is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Node '{node_id}' not found.",
+        )
+
+    # metadata_json is stored as a raw JSON string in the DB; parse it here
+    # so the response carries a proper dict rather than an escaped string.
+    raw_meta: Any = node.metadata_json
+    metadata: Any = raw_meta
+    if isinstance(raw_meta, str):
+        try:
+            metadata = json.loads(raw_meta)
+        except json.JSONDecodeError:
+            metadata = {}
+
+    return NodeDetailResponse(
+        id=node.id,
+        project_id=node.project_id,
+        parent_id=node.parent_id,
+        layer_type=node.layer_type,
+        node_name=node.node_name,
+        created_at=node.created_at,
+        version_tag=node.version_tag,
+        version_id=node.version_id,
+        content_markdown=node.content_markdown,
+        metadata_json=metadata,
+    )
