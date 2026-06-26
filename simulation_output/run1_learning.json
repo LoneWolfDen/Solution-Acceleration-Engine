@@ -1,0 +1,58 @@
+{
+  "simulation_run": "Run 1 (The Gap)",
+  "step": "Learning",
+  "timestamp": "2026-06-26T10:57:13.300166+00:00",
+  "citation_trend": {
+    "record_id": "7941bfa2-189d-4afe-b224-fb9bea022fa8",
+    "insight_type": "CITATION_TREND",
+    "trends": [
+      {
+        "artifact_id": "/simulation-alpha-v1.md",
+        "section_id": "1-5",
+        "frequency": 12
+      }
+    ],
+    "unique_sections_cited": 1
+  },
+  "confidence_matrix": {
+    "record_id": "82d055e8-48db-4224-8a0b-8ebe0f13e25d",
+    "insight_type": "CONFIDENCE_TREND",
+    "project_id": "df7532bc-8905-4fac-8686-1147afe9a5e9",
+    "version_order": [
+      "aeb238f6-7bce-411f-8126-c55063bdf0ef"
+    ],
+    "matrix": {
+      "aeb238f6-7bce-411f-8126-c55063bdf0ef": {
+        "Intent": "AMBER",
+        "Scope": "AMBER",
+        "Ownership": "AMBER",
+        "Delivery": "AMBER",
+        "Timeline": "AMBER",
+        "Architecture": "RED",
+        "NFR": "RED",
+        "Resource": "AMBER",
+        "Risk": "RED",
+        "Commercial": "AMBER",
+        "Language": "AMBER",
+        "Consistency": "AMBER"
+      }
+    }
+  },
+  "prompt_delta": {
+    "record_id": "a34550c6-575f-4038-a1a5-b35336c90b0f",
+    "insight_type": "PROMPT_DELTA",
+    "gate_failures": [
+      "APPROVAL_GATE",
+      "DELIVERY_CONFIDENCE",
+      "CONFLICT_SEVERITY_CONTROL"
+    ],
+    "delta_json": {
+      "approval_gate_guidance": "Ensure all identified issues have clear mitigations documented before recommending non-approval. If blockers cannot be resolved, state them explicitly with escalation paths.",
+      "confidence_calibration": "Calibrate your confidence assessment against industry delivery benchmarks. The score must reflect both identified risks AND the strength of proposed mitigations \u2014 a low score requires explicit justification.",
+      "critical_conflict_resolution": "For every Critical-severity conflict identified, provide a concrete path to resolution before assigning Critical severity. Reserve 'Critical' for conflicts that are genuinely unresolvable within the current proposal scope."
+    },
+    "base_prompt_length": 187,
+    "applied_to_blueprint_id": "fe8e96d8-820b-4751-964b-7048b2b2f312",
+    "adjustments_count": 3
+  }
+}

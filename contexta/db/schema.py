@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 # v2 → v3: Added ``intelligence_layer`` table for Sprint 6 PromptOptimizer.
 # v3 → v4: Added web-API tables: artifacts, artifact_version_links,
 #           review_jobs, proposal_jobs, app_config.
-SCHEMA_VERSION = 4
+# v3 → v4: Added ``reviews`` and ``knowledge_observations`` tables for Knowledge Memory.
+# v4 → v5: Added web-API tables: artifacts, artifact_version_links,
+#           review_jobs, proposal_jobs, app_config.
+SCHEMA_VERSION = 5
 
 # All DDL statements executed in order during migration.
 # CREATE TABLE IF NOT EXISTS ensures idempotency on re-runs.
@@ -191,6 +194,50 @@ DDL_STATEMENTS: list[str] = [
     CREATE TABLE IF NOT EXISTS app_config (
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL DEFAULT ''
+    # ── Reviews ───────────────────────────────────────────────────────────────
+    # Stores a single arbitration run scoped to a Version.
+    # ── Reviews ───────────────────────────────────────────────────────────────
+    # Stores a single arbitration run scoped to a Version (Sprint 2).
+    #
+    # Columns:
+    #   version_id            FK → versions.id (provenance anchor).
+    #   persona_prompt        The LLM persona prompt used for this review run.
+    #   user_context_text     Free-text user-supplied context or briefing.
+    #   sme_augmentation_list JSON array of SME knowledge augmentation strings.
+    #   dimension_output      JSON array of the 12-dimension review results.
+    #   dimension_output      JSON array of the 12-dimension review results
+    #                         (maps to spec field ``12_dimension_output`` — the
+    #                         leading digit is not a valid SQL or Python
+    #                         identifier start, so the column is named
+    #                         ``dimension_output`` throughout).
+    """
+    CREATE TABLE IF NOT EXISTS reviews (
+        id                    TEXT PRIMARY KEY,
+        version_id            TEXT NOT NULL REFERENCES versions(id),
+        persona_prompt        TEXT NOT NULL,
+        user_context_text     TEXT NOT NULL,
+        sme_augmentation_list TEXT NOT NULL DEFAULT '[]',
+        dimension_output      TEXT NOT NULL DEFAULT '[]',
+        created_at            TEXT NOT NULL
+    )
+    """,
+
+    # ── Knowledge Observations ────────────────────────────────────────────────
+    # Stores every user annotation (base → amended + rationale) so that the
+    # KnowledgeMemoryService can retrieve prior interventions and inject them
+    # as Contextual Constraints into subsequent LLM prompts.
+    # No FK on node_id — observations may reference logical context keys that
+    # span projects, enabling cross-project analytics.
+    """
+    CREATE TABLE IF NOT EXISTS knowledge_observations (
+        id            TEXT PRIMARY KEY,
+        phase         TEXT NOT NULL,
+        node_id       TEXT NOT NULL,
+        dimension     TEXT NOT NULL,
+        base_value    TEXT NOT NULL,
+        amended_value TEXT NOT NULL,
+        rationale     TEXT NOT NULL,
+        timestamp     TEXT NOT NULL
     )
     """,
 ]
@@ -247,6 +294,18 @@ async def run_migrations(conn: "aiosqlite.Connection") -> None:
         # Five new tables (artifacts, artifact_version_links, review_jobs,
         # proposal_jobs, app_config).  All created by CREATE TABLE IF NOT
         # EXISTS in step 1 — no column alterations required on existing tables.
+        # reviews and knowledge_observations are entirely new tables — no
+        # column alterations needed.  Handled idempotently by step 1 above.
+        # Nothing extra to do here.
+
+        # ── v3 → v4 ──────────────────────────────────────────────────────────
+        # reviews and knowledge_observations are entirely new tables.
+        # Handled idempotently by step 1. Nothing extra to do here.
+
+        # ── v4 → v5 ──────────────────────────────────────────────────────────
+        # Web-API tables (artifacts, artifact_version_links, review_jobs,
+        # proposal_jobs, app_config) are entirely new tables.
+        # Handled idempotently by step 1. Nothing extra to do here.
 
         # ── Record new schema version ─────────────────────────────────────────
         if stored_version == 0:
