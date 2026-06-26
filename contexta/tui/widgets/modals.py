@@ -281,3 +281,105 @@ class BlueprintErrorModal(_ModalBase):
 
     def action_dismiss_modal(self) -> None:
         self.dismiss(False)
+
+
+# ── EditFindingModal ──────────────────────────────────────────────────────────
+
+class EditFindingModal(_ModalBase):
+    """Capture a user override (amended value + rationale) for a finding.
+
+    Displayed when the user presses [i] on an ``AnnotatedFindingRow``.
+    The finding's current summary is shown for reference; the user enters:
+    - **Amended Value** — their override text replacing the AI output.
+    - **Rationale** — why they are making this change (stored in KnowledgeMemory).
+
+    Dismisses with a ``(amended_value, rationale)`` tuple on confirm, or
+    ``False`` on cancel / escape.
+    """
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(
+        self,
+        finding_summary: str = "",
+        finding_detail: str = "",
+        current_value: str = "",
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._finding_summary = finding_summary
+        self._finding_detail = finding_detail
+        self._current_value = current_value
+
+    def compose(self) -> ComposeResult:
+        summary_truncated = (
+            self._finding_summary[:140] + "…"
+            if len(self._finding_summary) > 140
+            else self._finding_summary
+        )
+        with Vertical():
+            yield Static("✏  Annotate Finding", classes="modal-title")
+            yield Static(
+                f"Finding: {summary_truncated}",
+                classes="modal-body",
+            )
+            yield Label("Amended Value:")
+            yield Input(
+                value=self._current_value,
+                id="amended-value-input",
+                placeholder="Enter your override for this finding…",
+            )
+            yield Label("Rationale:")
+            yield Input(
+                id="rationale-input",
+                placeholder="Why are you overriding this finding?",
+            )
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Cancel", variant="default", id="btn-cancel")
+                yield Button("Save Annotation", variant="primary", id="btn-confirm")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn-confirm":
+            amended = self.query_one("#amended-value-input", Input).value.strip()
+            rationale = self.query_one("#rationale-input", Input).value.strip()
+            if amended and rationale:
+                self.dismiss((amended, rationale))
+            # Both fields required — keep modal open if either is missing.
+        elif event.button.id == "btn-cancel":
+            self.dismiss(False)
+
+    def action_cancel(self) -> None:
+        """Cancel the edit modal without saving."""
+        self.dismiss(False)
+
+class ArbitratorErrorModal(_ModalBase):
+    """Display an ``ArbitratorError`` (or any arbitration failure) to the user.
+
+    Dismiss only — the user must resolve the underlying issue (e.g. missing
+    blueprint, LLM timeout) and retry the [C] Compare action.
+    """
+
+    BINDINGS = [("escape", "dismiss_modal", "Dismiss")]
+
+    def __init__(self, message: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._message = message
+
+    def compose(self) -> ComposeResult:
+        with Vertical():
+            yield Static("⚖  Arbitration Failed", classes="modal-title")
+            yield Static(
+                f"The Layer 2 arbitration could not complete:\n\n"
+                f"{self._message}\n\n"
+                "Ensure all 12 dimensions are complete and a blueprint is "
+                "active, then retry [C] Compare.",
+                classes="modal-body",
+            )
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Dismiss", variant="error", id="btn-dismiss")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(False)
+
+    def action_dismiss_modal(self) -> None:
+        self.dismiss(False)
