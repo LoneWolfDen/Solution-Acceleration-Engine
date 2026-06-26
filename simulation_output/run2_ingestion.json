@@ -1,0 +1,31 @@
+{
+  "simulation_run": "Run 2 (The Correction)",
+  "step": "Ingestion",
+  "timestamp": "2026-06-26T10:57:13.303461+00:00",
+  "project": {
+    "id": "df7532bc-8905-4fac-8686-1147afe9a5e9",
+    "name": "Simulation-Alpha",
+    "global_tags": [
+      "#FinancialServices",
+      "#Security",
+      "#PCI-DSS"
+    ]
+  },
+  "version": {
+    "id": "bfa3f1bc-8970-417b-82fd-3334712a5cef",
+    "name": "v2 \u2014 Corrected Proposal (The Correction)",
+    "description": "Security section added in full. Expected to produce Pass."
+  },
+  "artifact": {
+    "file_path": "/simulation-alpha-v2.md",
+    "uri": "file:///simulation-alpha-v2.md",
+    "line_count": 93,
+    "content_preview": "# Simulation-Alpha \u2014 Version 2: Corrected Proposal (The Correction)\n\n## 1. Project Overview\n\nSimulation-Alpha is an enterprise-grade financial data processing platform\nto be delivered over 18 months. ..."
+  },
+  "blueprint": {
+    "id": "fe8e96d8-820b-4751-964b-7048b2b2f312",
+    "name": "Simulation Blueprint",
+    "version": "1.0.0",
+    "is_active": false
+  }
+}

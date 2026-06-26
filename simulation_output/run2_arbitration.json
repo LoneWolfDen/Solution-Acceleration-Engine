@@ -1,0 +1,105 @@
+{
+  "simulation_run": "Run 2 (The Correction)",
+  "step": "Arbitration",
+  "timestamp": "2026-06-26T10:57:13.315566+00:00",
+  "exploration_node_id": "d67347a9-4a75-4a6c-b92a-9c24160318dd",
+  "version_id": "bfa3f1bc-8970-417b-82fd-3334712a5cef",
+  "all_complete": true,
+  "dimension_results": [
+    {
+      "dimension": "Intent",
+      "overall_confidence": "GREEN",
+      "finding_count": 1,
+      "finding_summary": "Intent: fully addressed in v2"
+    },
+    {
+      "dimension": "Scope",
+      "overall_confidence": "GREEN",
+      "finding_count": 1,
+      "finding_summary": "Scope: fully addressed in v2"
+    },
+    {
+      "dimension": "Ownership",
+      "overall_confidence": "GREEN",
+      "finding_count": 1,
+      "finding_summary": "Ownership: fully addressed in v2"
+    },
+    {
+      "dimension": "Delivery",
+      "overall_confidence": "GREEN",
+      "finding_count": 1,
+      "finding_summary": "Delivery: fully addressed in v2"
+    },
+    {
+      "dimension": "Timeline",
+      "overall_confidence": "GREEN",
+      "finding_count": 1,
+      "finding_summary": "Timeline: fully addressed in v2"
+    },
+    {
+      "dimension": "Architecture",
+      "overall_confidence": "GREEN",
+      "finding_count": 1,
+      "finding_summary": "Architecture: fully addressed in v2"
+    },
+    {
+      "dimension": "NFR",
+      "overall_confidence": "GREEN",
+      "finding_count": 1,
+      "finding_summary": "NFR: fully addressed in v2"
+    },
+    {
+      "dimension": "Resource",
+      "overall_confidence": "GREEN",
+      "finding_count": 1,
+      "finding_summary": "Resource: fully addressed in v2"
+    },
+    {
+      "dimension": "Risk",
+      "overall_confidence": "AMBER",
+      "finding_count": 1,
+      "finding_summary": "Risk: residual risk \u2014 pen-test vendor not yet confirmed"
+    },
+    {
+      "dimension": "Commercial",
+      "overall_confidence": "GREEN",
+      "finding_count": 1,
+      "finding_summary": "Commercial: fully addressed in v2"
+    },
+    {
+      "dimension": "Language",
+      "overall_confidence": "GREEN",
+      "finding_count": 1,
+      "finding_summary": "Language: fully addressed in v2"
+    },
+    {
+      "dimension": "Consistency",
+      "overall_confidence": "GREEN",
+      "finding_count": 1,
+      "finding_summary": "Consistency: fully addressed in v2"
+    }
+  ],
+  "summary": {
+    "RED": [],
+    "AMBER": [
+      "Risk"
+    ],
+    "GREEN": [
+      "Intent",
+      "Scope",
+      "Ownership",
+      "Delivery",
+      "Timeline",
+      "Architecture",
+      "NFR",
+      "Resource",
+      "Commercial",
+      "Language",
+      "Consistency"
+    ],
+    "red_count": 0,
+    "amber_count": 1,
+    "green_count": 11
+  },
+  "veto_signal": "No RED dimensions \u2014 proposal structurally sound"
+}
