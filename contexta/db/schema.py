@@ -23,7 +23,9 @@ logger = logging.getLogger(__name__)
 
 # Bump this integer whenever new DDL is added to DDL_STATEMENTS.
 # v1 → v2: Added ``versions`` table and ``version_id`` FK column on ``nodes``.
-SCHEMA_VERSION = 3
+# v2 → v3: Added ``intelligence_layer`` table for Sprint 6 PromptOptimizer.
+# v3 → v4: Added ``reviews`` and ``knowledge_observations`` tables for Knowledge Memory.
+SCHEMA_VERSION = 4
 
 # All DDL statements executed in order during migration.
 # CREATE TABLE IF NOT EXISTS ensures idempotency on re-runs.
@@ -99,6 +101,28 @@ DDL_STATEMENTS: list[str] = [
     )
     """,
 
+    # ── Intelligence Layer ────────────────────────────────────────────────────
+    # Stores learned insights produced by the Sprint 6 PromptOptimizer service.
+    # Three insight types are written here:
+    #   CITATION_TREND   — [ArtifactID:SectionID] citation frequency aggregates.
+    #   CONFIDENCE_TREND — ConfidenceMatrix keyed by version_id (per-project).
+    #   PROMPT_DELTA     — Recommended prompt adjustments from gate failures.
+    #
+    # project_id is nullable — NULL represents a global (cross-project) insight.
+    # source_node_id is nullable — aggregated insights span multiple nodes.
+    """
+    CREATE TABLE IF NOT EXISTS intelligence_layer (
+        id             TEXT PRIMARY KEY,
+        project_id     TEXT REFERENCES projects(id),
+        insight_type   TEXT NOT NULL,
+        source_node_id TEXT REFERENCES nodes(id),
+        payload_json   TEXT NOT NULL DEFAULT '{}',
+        created_at     TEXT NOT NULL
+    )
+    """,
+
+    # ── Reviews ───────────────────────────────────────────────────────────────
+    # Stores a single arbitration run scoped to a Version.
     # ── Reviews ───────────────────────────────────────────────────────────────
     # Stores a single arbitration run scoped to a Version (Sprint 2).
     #
@@ -107,6 +131,7 @@ DDL_STATEMENTS: list[str] = [
     #   persona_prompt        The LLM persona prompt used for this review run.
     #   user_context_text     Free-text user-supplied context or briefing.
     #   sme_augmentation_list JSON array of SME knowledge augmentation strings.
+    #   dimension_output      JSON array of the 12-dimension review results.
     #   dimension_output      JSON array of the 12-dimension review results
     #                         (maps to spec field ``12_dimension_output`` — the
     #                         leading digit is not a valid SQL or Python
@@ -185,6 +210,17 @@ async def run_migrations(conn: "aiosqlite.Connection") -> None:
                 )
             except Exception:
                 pass  # Column already exists on fresh installs — expected.
+
+        # ── v2 → v3 ──────────────────────────────────────────────────────────
+        # intelligence_layer is an entirely new table — no column alterations
+        # are needed on existing tables.  The CREATE TABLE IF NOT EXISTS in
+        # step 1 already handles both fresh installs and upgrades idempotently.
+        # Nothing extra to do here.
+
+        # ── v3 → v4 ──────────────────────────────────────────────────────────
+        # reviews and knowledge_observations are entirely new tables — no
+        # column alterations needed.  Handled idempotently by step 1 above.
+        # Nothing extra to do here.
 
         # ── Record new schema version ─────────────────────────────────────────
         if stored_version == 0:
