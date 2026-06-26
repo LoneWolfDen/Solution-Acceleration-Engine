@@ -31,6 +31,8 @@ from .models import (
     ReviewRow,
     VersionRow,
 )
+from .models import BlueprintRow, InsightRow, NodeRow, ProjectRow, VersionRow, ObservationRow, ReviewRow
+
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +102,31 @@ def _row_to_insight(row: aiosqlite.Row) -> InsightRow:
         observed_pattern=row["observed_pattern"],
         frequency_count=row["frequency_count"],
         last_updated=row["last_updated"],
+    )
+
+
+def _row_to_review(row: aiosqlite.Row) -> ReviewRow:
+    return ReviewRow(
+        id=row["id"],
+        version_id=row["version_id"],
+        persona_prompt=row["persona_prompt"],
+        user_context_text=row["user_context_text"],
+        sme_augmentation_list=json.loads(row["sme_augmentation_list"] or "[]"),
+        dimension_output=json.loads(row["dimension_output"] or "[]"),
+        created_at=row["created_at"],
+    )
+
+
+def _row_to_observation(row: aiosqlite.Row) -> ObservationRow:
+    return ObservationRow(
+        id=row["id"],
+        phase=row["phase"],
+        node_id=row["node_id"],
+        dimension=row["dimension"],
+        base_value=row["base_value"],
+        amended_value=row["amended_value"],
+        rationale=row["rationale"],
+        timestamp=row["timestamp"],
     )
 
 
@@ -901,6 +928,17 @@ async def create_review(
         user_context_text:     Free-text user-supplied context or briefing.
         sme_augmentation_list: List of SME knowledge augmentation strings.
         dimension_output:      List of dicts for the 12-dimension review output.
+        conn:                 Open aiosqlite connection.
+        version_id:           FK → versions.id.  Must reference an existing
+                              version; the FK constraint is enforced by SQLite.
+        persona_prompt:       The LLM persona prompt used for this run.
+        user_context_text:    Free-text user-supplied context or briefing.
+        sme_augmentation_list: List of SME knowledge augmentation strings;
+                              serialised to a JSON array in the DB.
+        dimension_output:     List of dicts representing the 12-dimension
+                              review output; serialised to a JSON array in the
+                              DB (maps to the spec's ``12_dimension_output``
+                              field).
 
     Returns:
         ``ReviewRow`` representing the newly inserted row.
@@ -942,7 +980,15 @@ async def get_review(
     conn: aiosqlite.Connection,
     review_id: str,
 ) -> Optional[ReviewRow]:
-    """Return the review with the given id, or None if not found."""
+    """Return the review with the given id, or None if not found.
+
+    Args:
+        conn:      Open aiosqlite connection.
+        review_id: UUID primary key of the review row to fetch.
+
+    Returns:
+        ``ReviewRow`` if found; ``None`` otherwise.
+    """
     cursor = await conn.execute(
         """
         SELECT id, version_id, persona_prompt, user_context_text,
@@ -959,7 +1005,16 @@ async def list_reviews_for_version(
     conn: aiosqlite.Connection,
     version_id: str,
 ) -> List[ReviewRow]:
-    """Return all reviews for a version ordered by creation time."""
+    """Return all reviews for a version ordered by creation time.
+
+    Args:
+        conn:       Open aiosqlite connection.
+        version_id: FK → versions.id — the Version whose reviews to list.
+
+    Returns:
+        List of ``ReviewRow`` objects, oldest first.  Empty list if the
+        version has no reviews.
+    """
     cursor = await conn.execute(
         """
         SELECT id, version_id, persona_prompt, user_context_text,
@@ -987,6 +1042,9 @@ def _row_to_observation(row: aiosqlite.Row) -> ObservationRow:
         rationale=row["rationale"],
         timestamp=row["timestamp"],
     )
+
+# Knowledge Observations
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 async def write_observation(

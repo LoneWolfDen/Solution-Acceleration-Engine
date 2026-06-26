@@ -123,6 +123,8 @@ DDL_STATEMENTS: list[str] = [
 
     # ── Reviews ───────────────────────────────────────────────────────────────
     # Stores a single arbitration run scoped to a Version.
+    # ── Reviews ───────────────────────────────────────────────────────────────
+    # Stores a single arbitration run scoped to a Version (Sprint 2).
     #
     # Columns:
     #   version_id            FK → versions.id (provenance anchor).
@@ -130,6 +132,11 @@ DDL_STATEMENTS: list[str] = [
     #   user_context_text     Free-text user-supplied context or briefing.
     #   sme_augmentation_list JSON array of SME knowledge augmentation strings.
     #   dimension_output      JSON array of the 12-dimension review results.
+    #   dimension_output      JSON array of the 12-dimension review results
+    #                         (maps to spec field ``12_dimension_output`` — the
+    #                         leading digit is not a valid SQL or Python
+    #                         identifier start, so the column is named
+    #                         ``dimension_output`` throughout).
     """
     CREATE TABLE IF NOT EXISTS reviews (
         id                    TEXT PRIMARY KEY,
