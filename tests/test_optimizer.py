@@ -29,7 +29,7 @@ Section 4 — PromptDelta
 
 Section 5 — DB / Repository layer
   - intelligence_layer table is created by init_database().
-  - SCHEMA_VERSION is 3.
+  - SCHEMA_VERSION is 4.
   - write_intelligence_record() inserts and returns a correct IntelligenceRow.
   - project_id=None (global) and project_id=<id> (scoped) round-trips.
   - get_intelligence_for_project() filters by project only.
@@ -767,13 +767,13 @@ async def test_prompt_delta_run_global_has_null_project_id(db) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_schema_version_is_3(db) -> None:
-    """SCHEMA_VERSION constant must be 3 and match what is stored in the DB."""
-    assert SCHEMA_VERSION == 3
+async def test_schema_version_is_current(db) -> None:
+    """SCHEMA_VERSION constant must match what is stored in the DB."""
+    assert SCHEMA_VERSION == 4
     cursor = await db.execute("SELECT version FROM schema_version LIMIT 1")
     row = await cursor.fetchone()
     assert row is not None
-    assert row[0] == 3
+    assert row[0] == SCHEMA_VERSION
 
 
 @pytest.mark.asyncio
@@ -907,16 +907,16 @@ async def test_get_intelligence_by_type_scoped_to_project(db) -> None:
 
 @pytest.mark.asyncio
 async def test_init_database_idempotent_with_new_schema(tmp_path) -> None:
-    """init_database() on an existing v2 file migrates cleanly to v3."""
+    """init_database() on an existing DB file migrates cleanly to current SCHEMA_VERSION."""
     db_path = str(tmp_path / "migrate.db")
     conn1 = await init_database(db_path)
     v1_cursor = await conn1.execute("SELECT version FROM schema_version LIMIT 1")
     v1_row = await v1_cursor.fetchone()
-    assert v1_row[0] == 3
+    assert v1_row[0] == SCHEMA_VERSION
     await conn1.close()
-    # Re-open: must not raise, must stay at version 3.
+    # Re-open: must not raise, must stay at current version.
     conn2 = await init_database(db_path)
     v2_cursor = await conn2.execute("SELECT version FROM schema_version LIMIT 1")
     v2_row = await v2_cursor.fetchone()
-    assert v2_row[0] == 3
+    assert v2_row[0] == SCHEMA_VERSION
     await conn2.close()
