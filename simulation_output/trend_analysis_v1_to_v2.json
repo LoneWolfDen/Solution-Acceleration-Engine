@@ -1,0 +1,122 @@
+{
+  "simulation": "Simulation-Alpha",
+  "comparison": "v1 (The Gap) \u2192 v2 (The Correction)",
+  "generated_at": "2026-06-26T10:57:13.323073+00:00",
+  "version_ids": {
+    "v1": "aeb238f6-7bce-411f-8126-c55063bdf0ef",
+    "v1_name": "v1 \u2014 Initial Review (The Gap)",
+    "v2": "bfa3f1bc-8970-417b-82fd-3334712a5cef",
+    "v2_name": "v2 \u2014 Corrected Proposal (The Correction)"
+  },
+  "dimension_comparison": [
+    {
+      "dimension": "Intent",
+      "v1": "AMBER",
+      "v2": "GREEN",
+      "delta": "IMPROVED"
+    },
+    {
+      "dimension": "Scope",
+      "v1": "AMBER",
+      "v2": "GREEN",
+      "delta": "IMPROVED"
+    },
+    {
+      "dimension": "Ownership",
+      "v1": "AMBER",
+      "v2": "GREEN",
+      "delta": "IMPROVED"
+    },
+    {
+      "dimension": "Delivery",
+      "v1": "AMBER",
+      "v2": "GREEN",
+      "delta": "IMPROVED"
+    },
+    {
+      "dimension": "Timeline",
+      "v1": "AMBER",
+      "v2": "GREEN",
+      "delta": "IMPROVED"
+    },
+    {
+      "dimension": "Architecture",
+      "v1": "RED",
+      "v2": "GREEN",
+      "delta": "CRITICAL_RESOLVED"
+    },
+    {
+      "dimension": "NFR",
+      "v1": "RED",
+      "v2": "GREEN",
+      "delta": "CRITICAL_RESOLVED"
+    },
+    {
+      "dimension": "Resource",
+      "v1": "AMBER",
+      "v2": "GREEN",
+      "delta": "IMPROVED"
+    },
+    {
+      "dimension": "Risk",
+      "v1": "RED",
+      "v2": "AMBER",
+      "delta": "IMPROVED"
+    },
+    {
+      "dimension": "Commercial",
+      "v1": "AMBER",
+      "v2": "GREEN",
+      "delta": "IMPROVED"
+    },
+    {
+      "dimension": "Language",
+      "v1": "AMBER",
+      "v2": "GREEN",
+      "delta": "IMPROVED"
+    },
+    {
+      "dimension": "Consistency",
+      "v1": "AMBER",
+      "v2": "GREEN",
+      "delta": "IMPROVED"
+    }
+  ],
+  "aggregate_confidence_delta": {
+    "v1_score": 42,
+    "v2_score": 87,
+    "delta": 45,
+    "v1_verdict": "VETO",
+    "v2_verdict": "PASS",
+    "outcome": "SECURITY GAP RESOLVED \u2014 delivery confidence restored"
+  },
+  "gate_comparison": {
+    "v1_failed_gates": [
+      "APPROVAL_GATE",
+      "DELIVERY_CONFIDENCE",
+      "CONFLICT_SEVERITY_CONTROL"
+    ],
+    "v2_failed_gates": [],
+    "gates_resolved": [
+      "APPROVAL_GATE",
+      "DELIVERY_CONFIDENCE",
+      "CONFLICT_SEVERITY_CONTROL"
+    ],
+    "gates_regressed": [],
+    "all_gates_resolved": true
+  },
+  "prompt_delta_from_run1": {
+    "description": "PromptDelta generated after Run 1 gate failures. These adjustments informed the prompt context for Run 2 synthesis.",
+    "gate_failures": [
+      "APPROVAL_GATE",
+      "DELIVERY_CONFIDENCE",
+      "CONFLICT_SEVERITY_CONTROL"
+    ],
+    "delta_json": {
+      "approval_gate_guidance": "Ensure all identified issues have clear mitigations documented before recommending non-approval. If blockers cannot be resolved, state them explicitly with escalation paths.",
+      "confidence_calibration": "Calibrate your confidence assessment against industry delivery benchmarks. The score must reflect both identified risks AND the strength of proposed mitigations \u2014 a low score requires explicit justification.",
+      "critical_conflict_resolution": "For every Critical-severity conflict identified, provide a concrete path to resolution before assigning Critical severity. Reserve 'Critical' for conflicts that are genuinely unresolvable within the current proposal scope."
+    },
+    "adjustments_count": 3
+  }
+}
