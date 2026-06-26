@@ -14,6 +14,12 @@ dependencies = [
     "aiosqlite>=0.19.0",
     "litellm>=1.20.0",
     "mcp>=1.0.0",
+    # Web API layer
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "httpx>=0.26.0",
+    # Web UI layer
+    "reflex==0.6.7",
 ]
 
 [project.optional-dependencies]
