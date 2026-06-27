@@ -1,0 +1,72 @@
+# Dockerfile.web — Contexta Web UI (Reflex)
+#
+# Runs the Reflex web application (Milestone 2).
+# The TUI entry point is unchanged; use the original Dockerfile for TUI mode.
+#
+# Build:
+#   docker build -t contexta-web -f Dockerfile.web .
+#
+# Run (development):
+#   docker run -p 3000:3000 -p 8000:8000 contexta-web
+#
+# Run (production):
+#   docker run -p 3000:3000 -p 8000:8000 -e REFLEX_ENV=prod contexta-web
+#
+# Ports:
+#   3000 — Reflex frontend (Next.js / static build)
+#   8000 — Reflex backend (FastAPI / WebSocket)
+
+FROM python:3.11-slim
+
+LABEL maintainer="Project Contexta"
+LABEL description="Contexta Web UI — Reflex single-container deployment"
+
+WORKDIR /app
+
+# System dependencies required by Reflex's Node.js frontend build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        sqlite3 \
+        curl \
+        unzip \
+    && curl -fsSL https://deb.nodesource.com/setup_18.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir \
+        "textual>=0.47.0" \
+        "pydantic>=2.5.0" \
+        "pydantic-settings>=2.1.0" \
+        "aiosqlite>=0.19.0" \
+        "litellm>=1.20.0" \
+        "mcp>=1.0.0" \
+        "reflex>=0.6.0"
+
+# Copy full source
+COPY contexta/ ./contexta/
+COPY web/      ./web/
+COPY rxconfig.py ./
+
+# Initialise Reflex (downloads frontend deps, generates .web directory)
+# This step runs at build time so the container starts instantly.
+RUN reflex init
+
+# Persistent data directories
+VOLUME ["/data", "/exports"]
+
+ENV CONTEXTA_DB_PATH=/data/contexta.db \
+    CONTEXTA_EXPORT_PATH=/exports \
+    CONTEXTA_LOG_LEVEL=WARNING \
+    REFLEX_ENV=dev
+
+# Run as non-root
+RUN useradd --create-home --shell /bin/bash contexta
+RUN chown -R contexta:contexta /app
+USER contexta
+
+EXPOSE 3000 8000
+
+# Start Reflex (dev mode by default; set REFLEX_ENV=prod for production build)
+CMD ["reflex", "run", "--backend-host", "0.0.0.0"]
