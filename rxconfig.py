@@ -45,9 +45,14 @@ else:
 config = rx.Config(
     app_name="web",
     # Move Reflex's own backend off 8000 so FastAPI can own that port.
-    backend_port=8000,
-    api_url="http://localhost:8000",
+    #backend_port=8000,
+    #api_url="http://localhost:8000",
     # This prevents the proxy from trying to manage the webserver's external traffic
+    
+    # Force the API to use the public Codespace URL, not localhost
+    api_url=os.getenv("PUBLIC_API_URL", "https://glorious-memory-jr5vjjp7q4x42pq94-8000.app.github.dev"),
+    backend_port=8001,
+
     backend_host="127.0.0.1",
     # No telemetry — offline-first deployment.
     telemetry_enabled=False,
