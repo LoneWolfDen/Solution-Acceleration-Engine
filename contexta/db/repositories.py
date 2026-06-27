@@ -21,7 +21,18 @@ import aiosqlite
 from pydantic import ValidationError
 
 from ..models.payloads import ReviewNodePayload
-from .models import BlueprintRow, InsightRow, IntelligenceRow, NodeRow, ProjectRow, VersionRow
+from .models import (
+    BlueprintRow,
+    InsightRow,
+    IntelligenceRow,
+    NodeRow,
+    ObservationRow,
+    ProjectRow,
+    ReviewRow,
+    VersionRow,
+)
+from .models import BlueprintRow, InsightRow, NodeRow, ProjectRow, VersionRow, ObservationRow, ReviewRow
+
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +102,31 @@ def _row_to_insight(row: aiosqlite.Row) -> InsightRow:
         observed_pattern=row["observed_pattern"],
         frequency_count=row["frequency_count"],
         last_updated=row["last_updated"],
+    )
+
+
+def _row_to_review(row: aiosqlite.Row) -> ReviewRow:
+    return ReviewRow(
+        id=row["id"],
+        version_id=row["version_id"],
+        persona_prompt=row["persona_prompt"],
+        user_context_text=row["user_context_text"],
+        sme_augmentation_list=json.loads(row["sme_augmentation_list"] or "[]"),
+        dimension_output=json.loads(row["dimension_output"] or "[]"),
+        created_at=row["created_at"],
+    )
+
+
+def _row_to_observation(row: aiosqlite.Row) -> ObservationRow:
+    return ObservationRow(
+        id=row["id"],
+        phase=row["phase"],
+        node_id=row["node_id"],
+        dimension=row["dimension"],
+        base_value=row["base_value"],
+        amended_value=row["amended_value"],
+        rationale=row["rationale"],
+        timestamp=row["timestamp"],
     )
 
 
@@ -851,3 +887,257 @@ async def get_intelligence_by_type(
         )
     rows = await cursor.fetchall()
     return [_row_to_intelligence(r) for r in rows]
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reviews
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _row_to_review(row: aiosqlite.Row) -> ReviewRow:
+    return ReviewRow(
+        id=row["id"],
+        version_id=row["version_id"],
+        persona_prompt=row["persona_prompt"],
+        user_context_text=row["user_context_text"],
+        sme_augmentation_list=json.loads(row["sme_augmentation_list"] or "[]"),
+        dimension_output=json.loads(row["dimension_output"] or "[]"),
+        created_at=row["created_at"],
+    )
+
+
+async def create_review(
+    conn: aiosqlite.Connection,
+    version_id: str,
+    persona_prompt: str,
+    user_context_text: str,
+    sme_augmentation_list: List[str],
+    dimension_output: List[dict],
+) -> ReviewRow:
+    """Insert a new review row and return it.
+
+    A Review records a single arbitration run scoped to a Version.  The
+    ``version_id`` is mandatory — it is the provenance anchor that satisfies
+    the Traceability Standard (scope.md §3): every ReviewRow must be linked
+    to exactly one Version.
+
+    Args:
+        conn:                  Open aiosqlite connection.
+        version_id:            FK → versions.id.
+        persona_prompt:        The LLM persona prompt used for this run.
+        user_context_text:     Free-text user-supplied context or briefing.
+        sme_augmentation_list: List of SME knowledge augmentation strings.
+        dimension_output:      List of dicts for the 12-dimension review output.
+        conn:                 Open aiosqlite connection.
+        version_id:           FK → versions.id.  Must reference an existing
+                              version; the FK constraint is enforced by SQLite.
+        persona_prompt:       The LLM persona prompt used for this run.
+        user_context_text:    Free-text user-supplied context or briefing.
+        sme_augmentation_list: List of SME knowledge augmentation strings;
+                              serialised to a JSON array in the DB.
+        dimension_output:     List of dicts representing the 12-dimension
+                              review output; serialised to a JSON array in the
+                              DB (maps to the spec's ``12_dimension_output``
+                              field).
+
+    Returns:
+        ``ReviewRow`` representing the newly inserted row.
+    """
+    row_id = _new_id()
+    now = _now_iso()
+
+    await conn.execute(
+        """
+        INSERT INTO reviews
+            (id, version_id, persona_prompt, user_context_text,
+             sme_augmentation_list, dimension_output, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            row_id,
+            version_id,
+            persona_prompt,
+            user_context_text,
+            json.dumps(sme_augmentation_list),
+            json.dumps(dimension_output),
+            now,
+        ),
+    )
+    await conn.commit()
+
+    return ReviewRow(
+        id=row_id,
+        version_id=version_id,
+        persona_prompt=persona_prompt,
+        user_context_text=user_context_text,
+        sme_augmentation_list=sme_augmentation_list,
+        dimension_output=dimension_output,
+        created_at=now,
+    )
+
+
+async def get_review(
+    conn: aiosqlite.Connection,
+    review_id: str,
+) -> Optional[ReviewRow]:
+    """Return the review with the given id, or None if not found.
+
+    Args:
+        conn:      Open aiosqlite connection.
+        review_id: UUID primary key of the review row to fetch.
+
+    Returns:
+        ``ReviewRow`` if found; ``None`` otherwise.
+    """
+    cursor = await conn.execute(
+        """
+        SELECT id, version_id, persona_prompt, user_context_text,
+               sme_augmentation_list, dimension_output, created_at
+        FROM reviews WHERE id = ?
+        """,
+        (review_id,),
+    )
+    row = await cursor.fetchone()
+    return _row_to_review(row) if row else None
+
+
+async def list_reviews_for_version(
+    conn: aiosqlite.Connection,
+    version_id: str,
+) -> List[ReviewRow]:
+    """Return all reviews for a version ordered by creation time.
+
+    Args:
+        conn:       Open aiosqlite connection.
+        version_id: FK → versions.id — the Version whose reviews to list.
+
+    Returns:
+        List of ``ReviewRow`` objects, oldest first.  Empty list if the
+        version has no reviews.
+    """
+    cursor = await conn.execute(
+        """
+        SELECT id, version_id, persona_prompt, user_context_text,
+               sme_augmentation_list, dimension_output, created_at
+        FROM reviews WHERE version_id = ? ORDER BY created_at
+        """,
+        (version_id,),
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_review(r) for r in rows]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Knowledge Observations
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _row_to_observation(row: aiosqlite.Row) -> ObservationRow:
+    return ObservationRow(
+        id=row["id"],
+        phase=row["phase"],
+        node_id=row["node_id"],
+        dimension=row["dimension"],
+        base_value=row["base_value"],
+        amended_value=row["amended_value"],
+        rationale=row["rationale"],
+        timestamp=row["timestamp"],
+    )
+
+# Knowledge Observations
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+async def write_observation(
+    conn: aiosqlite.Connection,
+    phase: str,
+    node_id: str,
+    dimension: str,
+    base_value: str,
+    amended_value: str,
+    rationale: str,
+) -> ObservationRow:
+    """Persist a single user annotation as a KnowledgeMemory observation.
+
+    Args:
+        conn:          Open aiosqlite connection.
+        phase:         PhaseEnum.value — pipeline phase of the source finding.
+        node_id:       Logical context key (exploration node id or session id).
+        dimension:     ReviewDimensionEnum.value the finding belongs to.
+        base_value:    Original AI-produced text at annotation time.
+        amended_value: User's override text.
+        rationale:     Why the user made this change.
+
+    Returns:
+        ObservationRow representing the newly inserted row.
+    """
+    row_id = _new_id()
+    now = _now_iso()
+    await conn.execute(
+        """
+        INSERT INTO knowledge_observations
+            (id, phase, node_id, dimension, base_value, amended_value, rationale, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (row_id, phase, node_id, dimension, base_value, amended_value, rationale, now),
+    )
+    await conn.commit()
+    return ObservationRow(
+        id=row_id,
+        phase=phase,
+        node_id=node_id,
+        dimension=dimension,
+        base_value=base_value,
+        amended_value=amended_value,
+        rationale=rationale,
+        timestamp=now,
+    )
+
+
+async def get_observations_for_context(
+    conn: aiosqlite.Connection,
+    dimension: Optional[str] = None,
+    phase: Optional[str] = None,
+    limit: int = 10,
+) -> List[ObservationRow]:
+    """Return the most recent KnowledgeMemory observations matching the context.
+
+    Used by KnowledgeMemoryService to fetch prior user interventions before
+    an LLM call so they can be injected as Contextual Constraints.
+
+    Filters are applied with AND logic when provided.  Ordered newest-first
+    and capped at *limit* to avoid context-window bloat.
+
+    Args:
+        conn:      Open aiosqlite connection.
+        dimension: If provided, restrict to observations for this dimension.
+        phase:     If provided, restrict to observations from this phase.
+        limit:     Maximum rows to return (default 10).
+
+    Returns:
+        List of ObservationRow ordered by timestamp DESC.
+    """
+    clauses: list[str] = []
+    params: list[str] = []
+
+    if dimension is not None:
+        clauses.append("dimension = ?")
+        params.append(dimension)
+    if phase is not None:
+        clauses.append("phase = ?")
+        params.append(phase)
+
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(str(limit))
+
+    cursor = await conn.execute(
+        f"""
+        SELECT id, phase, node_id, dimension, base_value, amended_value, rationale, timestamp
+        FROM knowledge_observations
+        {where}
+        ORDER BY timestamp DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_observation(r) for r in rows]
