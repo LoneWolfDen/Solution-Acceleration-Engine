@@ -29,6 +29,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+# ── CORS origin resolution ────────────────────────────────────────────────────
+# In a Codespace the browser origin is https://{CODESPACE_NAME}-3000.app.github.dev.
+# When allow_origins=["*"] with allow_credentials=True the CORS spec requires the
+# server to echo the concrete request Origin — Starlette does this automatically.
+# However, specifying origins explicitly is more correct and avoids edge cases with
+# some browser pre-flight implementations.
+_CODESPACE_NAME: str = os.environ.get("CODESPACE_NAME", "")
+
 from ..db import repositories as repo
 from ..db.schema import init_database
 from .schemas import (
@@ -64,11 +72,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Permissive CORS for local dev — the Reflex frontend runs on a different port.
-# Harden to specific origins during the Security milestone.
+# CORS — allow the Reflex frontend origin (port 3000) to reach the API.
+# When CODESPACE_NAME is available we use the concrete public Codespace origin
+# so the Access-Control-Allow-Origin header satisfies the browser for credentialed
+# requests (CORS spec forbids "*" with credentials=True; explicit origin is safer).
+# Falls back to allow_origins=["*"] for pure local dev where credentials are not
+# typically required and there is no proxy rewriting the Origin header.
+if _CODESPACE_NAME:
+    _cors_origins: list[str] = [
+        f"https://{_CODESPACE_NAME}-3000.app.github.dev",
+        f"https://{_CODESPACE_NAME}-8001.app.github.dev",
+        "http://localhost:3000",
+    ]
+else:
+    _cors_origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
