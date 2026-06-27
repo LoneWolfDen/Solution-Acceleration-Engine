@@ -25,28 +25,51 @@ Computed vars (server-side, cached):
   selected_node_layer_type       ← str, safe empty fallback
   selected_node_created_at       ← str, safe empty fallback
   selected_node_content_json     ← str, pretty-printed JSON of content_markdown
+
+API URL resolution
+──────────────────
+All httpx calls originate from the Reflex backend process (server-side), so
+the API URL must be reachable from inside the container / Codespace — NOT from
+the browser.  "localhost:8000" is correct for server-to-server calls inside a
+single container or the same Codespace VM.
+
+Override via CONTEXTA_API_URL if the topology differs (e.g. separate containers
+in docker-compose, or external FastAPI deployment).
+
+Codespace auto-detection:
+  If CODESPACE_NAME is set, the FastAPI public URL is
+  https://{CODESPACE_NAME}-8000.app.github.dev — useful as a fallback, but
+  server-to-server should still prefer http://localhost:8000 when both processes
+  share the same network namespace.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 import httpx
 import reflex as rx
 
-# ── API base URL ───────────────────────────────────────────────────────────────
-# FastAPI runs on port 8000; Reflex backend on 8001 (see rxconfig.py).
-# Override via CONTEXTA_API_URL in the environment.
-_API_BASE: str = os.environ.get("CONTEXTA_API_URL", "http://localhost:8000")
+# ── Logging ───────────────────────────────────────────────────────────────────
+# Logs appear in the terminal running "reflex run", not in the browser console.
+_log = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 
+# ── API base URL ───────────────────────────────────────────────────────────────
+# AppState event handlers call FastAPI server-side via httpx.
+# Prefer CONTEXTA_API_URL env var; default to localhost for single-container.
+_API_BASE: str = os.environ.get("CONTEXTA_API_URL", "http://localhost:8000")
 _HTTP_TIMEOUT: float = 10.0
+
+_log.info("AppState: API base resolved to %s", _API_BASE)
 
 
 class AppState(rx.State):
-    # Use the full public URL of your backend (port 8000)
-    _API_BASE: str = "https://glorious-memory-jr5vjjp7q4x42pq94-8000.app.github.dev"
-
     """
     Central application state.
 
@@ -118,18 +141,26 @@ class AppState(rx.State):
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
+    @rx.event
+    def on_mount(self):
+        """
+        Called via on_load in web.py when the index page is first rendered.
+        Chains into load_projects so a single lifecycle hook triggers the
+        initial data fetch.
+        """
+        _log.info("on_mount fired — chaining to load_projects")
+        return AppState.load_projects
+
     async def load_projects(self):
         """
-        Fetch all projects from the API.
-        Called on page load via app.add_page(on_load=AppState.load_projects).
-        """
-        # This will show in the terminal running 'reflex run'
-        print("DEBUG: load_projects method invoked") 
-        async with httpx.AsyncClient() as client:
-            response = await client.get("http://localhost:8000/api/projects")
-            print(f"DEBUG: Data received: {response.json()}")
-            self.projects = response.json()
+        Fetch all projects from the FastAPI backend.
 
+        Called on page load via app.add_page(on_load=AppState.on_mount).
+        All network I/O is server-side; logs appear in the Reflex terminal.
+        """
+        _log.info(
+            "load_projects: starting fetch from %s/api/projects", _API_BASE
+        )
         self.is_loading = True
         yield
 
@@ -138,10 +169,24 @@ class AppState(rx.State):
                 resp = await client.get(f"{_API_BASE}/api/projects")
                 resp.raise_for_status()
                 self.projects = resp.json()
+                _log.info(
+                    "load_projects: success — received %d project(s)",
+                    len(self.projects),
+                )
             except httpx.HTTPStatusError as exc:
+                _log.error(
+                    "load_projects: HTTP %s from API — %s",
+                    exc.response.status_code,
+                    exc.response.text,
+                )
                 error = exc.response.json().get("error", "Failed to load projects.")
                 yield rx.toast.error(error)
             except httpx.RequestError as exc:
+                _log.error(
+                    "load_projects: network error reaching %s — %s",
+                    _API_BASE,
+                    exc,
+                )
                 yield rx.toast.error(
                     f"Cannot reach API at {_API_BASE}. Is the server running? ({exc})"
                 )
@@ -175,11 +220,17 @@ class AppState(rx.State):
                 resp.raise_for_status()
                 self.selected_project = resp.json()
             except httpx.HTTPStatusError as exc:
+                _log.error(
+                    "select_project: HTTP %s — %s",
+                    exc.response.status_code,
+                    exc.response.text,
+                )
                 error = exc.response.json().get(
                     "error", f"Failed to load project '{project_id}'."
                 )
                 yield rx.toast.error(error)
             except httpx.RequestError as exc:
+                _log.error("select_project: network error — %s", exc)
                 yield rx.toast.error(f"Network error: {exc}")
 
         self.is_loading = False
@@ -217,16 +268,17 @@ class AppState(rx.State):
                 resp.raise_for_status()
                 self.selected_node = resp.json()
             except httpx.HTTPStatusError as exc:
+                _log.error(
+                    "select_node: HTTP %s — %s",
+                    exc.response.status_code,
+                    exc.response.text,
+                )
                 error = exc.response.json().get(
                     "error", f"Failed to load node '{node_id}'."
                 )
                 yield rx.toast.error(error)
             except httpx.RequestError as exc:
+                _log.error("select_node: network error — %s", exc)
                 yield rx.toast.error(f"Network error: {exc}")
 
         self.is_loading = False
-    
-    @rx.event
-    def on_mount(self):
-        print("DEBUG: Component mounted, triggering load_projects")
-        return self.load_projects()
