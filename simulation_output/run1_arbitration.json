@@ -1,0 +1,105 @@
+{
+  "simulation_run": "Run 1 (The Gap)",
+  "step": "Arbitration",
+  "timestamp": "2026-06-26T10:57:13.296126+00:00",
+  "exploration_node_id": "8944372e-a1a8-4616-b24e-d690257fe9ac",
+  "version_id": "aeb238f6-7bce-411f-8126-c55063bdf0ef",
+  "all_complete": true,
+  "dimension_results": [
+    {
+      "dimension": "Intent",
+      "overall_confidence": "AMBER",
+      "finding_count": 1,
+      "finding_summary": "Intent: adequate coverage, minor gaps noted"
+    },
+    {
+      "dimension": "Scope",
+      "overall_confidence": "AMBER",
+      "finding_count": 1,
+      "finding_summary": "Scope: adequate coverage, minor gaps noted"
+    },
+    {
+      "dimension": "Ownership",
+      "overall_confidence": "AMBER",
+      "finding_count": 1,
+      "finding_summary": "Ownership: adequate coverage, minor gaps noted"
+    },
+    {
+      "dimension": "Delivery",
+      "overall_confidence": "AMBER",
+      "finding_count": 1,
+      "finding_summary": "Delivery: adequate coverage, minor gaps noted"
+    },
+    {
+      "dimension": "Timeline",
+      "overall_confidence": "AMBER",
+      "finding_count": 1,
+      "finding_summary": "Timeline: adequate coverage, minor gaps noted"
+    },
+    {
+      "dimension": "Architecture",
+      "overall_confidence": "RED",
+      "finding_count": 1,
+      "finding_summary": "Architecture: CRITICAL \u2014 no security controls documented"
+    },
+    {
+      "dimension": "NFR",
+      "overall_confidence": "RED",
+      "finding_count": 1,
+      "finding_summary": "NFR: CRITICAL \u2014 no security controls documented"
+    },
+    {
+      "dimension": "Resource",
+      "overall_confidence": "AMBER",
+      "finding_count": 1,
+      "finding_summary": "Resource: adequate coverage, minor gaps noted"
+    },
+    {
+      "dimension": "Risk",
+      "overall_confidence": "RED",
+      "finding_count": 1,
+      "finding_summary": "Risk: CRITICAL \u2014 no security controls documented"
+    },
+    {
+      "dimension": "Commercial",
+      "overall_confidence": "AMBER",
+      "finding_count": 1,
+      "finding_summary": "Commercial: adequate coverage, minor gaps noted"
+    },
+    {
+      "dimension": "Language",
+      "overall_confidence": "AMBER",
+      "finding_count": 1,
+      "finding_summary": "Language: adequate coverage, minor gaps noted"
+    },
+    {
+      "dimension": "Consistency",
+      "overall_confidence": "AMBER",
+      "finding_count": 1,
+      "finding_summary": "Consistency: adequate coverage, minor gaps noted"
+    }
+  ],
+  "summary": {
+    "RED": [
+      "Architecture",
+      "NFR",
+      "Risk"
+    ],
+    "AMBER": [
+      "Intent",
+      "Scope",
+      "Ownership",
+      "Delivery",
+      "Timeline",
+      "Resource",
+      "Commercial",
+      "Language",
+      "Consistency"
+    ],
+    "GREEN": [],
+    "red_count": 3,
+    "amber_count": 9,
+    "green_count": 0
+  },
+  "veto_signal": "SECURITY GAP DETECTED \u2014 3 RED dimension(s): ['Architecture', 'NFR', 'Risk']"
+}
