@@ -1,1 +1,1 @@
-# web package — Reflex frontend application.
+"""web — Reflex web UI for the Solution Acceleration Engine."""
