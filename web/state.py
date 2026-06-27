@@ -70,6 +70,9 @@ _log.info("AppState: API base resolved to %s", _API_BASE)
 
 
 class AppState(rx.State):
+    # Use the full public URL of your backend (port 8000)
+    _API_BASE: str = "https://glorious-memory-jr5vjjp7q4x42pq94-8000.app.github.dev"
+
     """
     Central application state.
 
@@ -141,26 +144,19 @@ class AppState(rx.State):
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
-    @rx.event
-    def on_mount(self):
+    async def load_projects(self):
         """
         Called via on_load in web.py when the index page is first rendered.
         Chains into load_projects so a single lifecycle hook triggers the
         initial data fetch.
         """
-        _log.info("on_mount fired — chaining to load_projects")
-        return AppState.load_projects
+        # This will show in the terminal running 'reflex run'
+        print("DEBUG: load_projects method invoked") 
+        async with httpx.AsyncClient() as client:
+            response = await client.get("http://localhost:8000/api/projects")
+            print(f"DEBUG: Data received: {response.json()}")
+            self.projects = response.json()
 
-    async def load_projects(self):
-        """
-        Fetch all projects from the FastAPI backend.
-
-        Called on page load via app.add_page(on_load=AppState.on_mount).
-        All network I/O is server-side; logs appear in the Reflex terminal.
-        """
-        _log.info(
-            "load_projects: starting fetch from %s/api/projects", _API_BASE
-        )
         self.is_loading = True
         yield
 
@@ -282,3 +278,8 @@ class AppState(rx.State):
                 yield rx.toast.error(f"Network error: {exc}")
 
         self.is_loading = False
+    
+    @rx.event
+    def on_mount(self):
+        print("DEBUG: Component mounted, triggering load_projects")
+        return self.load_projects()
