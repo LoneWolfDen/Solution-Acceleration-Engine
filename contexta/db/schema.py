@@ -12,9 +12,11 @@ Data hierarchy (scope.md):
 """
 
 from __future__ import annotations
-
+import asyncio
 import logging
+import uuid
 from pathlib import Path
+import aiosqlite
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:

@@ -17,6 +17,8 @@ config = rx.Config(
     # Move Reflex's own backend off 8000 so FastAPI can own that port.
     backend_port=8000,
     api_url="http://localhost:8000",
+    # This prevents the proxy from trying to manage the webserver's external traffic
+    backend_host="127.0.0.1",
     # No telemetry — offline-first deployment.
     telemetry_enabled=False,
 )
