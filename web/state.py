@@ -44,6 +44,9 @@ _HTTP_TIMEOUT: float = 10.0
 
 
 class AppState(rx.State):
+    # Use the full public URL of your backend (port 8000)
+    _API_BASE: str = "https://glorious-memory-jr5vjjp7q4x42pq94-8000.app.github.dev"
+
     """
     Central application state.
 
