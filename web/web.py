@@ -1,35 +1,60 @@
-"""
-web/web.py — Reflex application entry point.
+"""web/web.py — Reflex application entry point.
 
-Registers the single index page, binds AppState, and configures the theme.
-This is the module referenced by rxconfig.py (app_name = "web").
+Wires the two-pane layout (sidebar + content_pane) and registers the
+single page route with AppState.on_load as the page lifecycle hook.
 
-Run locally with:
-    reflex run                        # dev mode (hot reload)
+Run with:
+    reflex run          (development, hot-reload)
+    reflex run --env prod  (production)
 
-In production (inside Docker, managed by supervisord):
-    python -m reflex run --env prod --backend-port 8001 --frontend-port 3000
+Ensure MOCK_MODE = True in web/state.py for offline / proxy-limited
+environments.  Flip to False once a live DB is available.
 """
 
 import reflex as rx
 
-from .components.layout import layout
-from .state import AppState
+from web.state import AppState
+from web.components.sidebar import sidebar
+from web.components.content_pane import content_pane
 
+
+# ---------------------------------------------------------------------------
+# Page layout
+# ---------------------------------------------------------------------------
 
 def index() -> rx.Component:
-    """Root page component — delegates entirely to the layout shell."""
-    return layout()
+    """Root page: full-viewport horizontal split — sidebar | content."""
+    return rx.box(
+        # Global reset / baseline
+        rx.html(
+            "<style>"
+            "*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }"
+            "body { background: #0b0e14; overflow: hidden; }"
+            "</style>"
+        ),
+        rx.hstack(
+            sidebar(),
+            content_pane(),
+            spacing="0",
+            align="stretch",
+            width="100vw",
+            height="100vh",
+            overflow="hidden",
+        ),
+        width="100vw",
+        height="100vh",
+        overflow="hidden",
+    )
 
 
-# ── App instance ──────────────────────────────────────────────────────────────
-# rx.theme sets the Radix UI design system baseline.
-# appearance="light" keeps the UI clean and readable for non-technical users.
+# ---------------------------------------------------------------------------
+# Application
+# ---------------------------------------------------------------------------
+
 app = rx.App(
     theme=rx.theme(
-        appearance="light",
-        accent_color="blue",
-        gray_color="slate",
+        appearance="dark",
+        accent_color="indigo",
         radius="medium",
     ),
 )
@@ -37,8 +62,6 @@ app = rx.App(
 app.add_page(
     index,
     route="/",
-    title="Contexta",
-    description="Solution Validation Pipeline",
-    #on_load=AppState.load_projects,
-    on_load=AppState.on_mount,
+    title="Solution Acceleration Engine",
+    on_load=AppState.on_load,
 )
