@@ -115,11 +115,18 @@ class AppState(rx.State):
 
     # ── Event handlers ────────────────────────────────────────────────────────
 
-    async def load_projects(self) -> None:
+    async def load_projects(self):
         """
         Fetch all projects from the API.
         Called on page load via app.add_page(on_load=AppState.load_projects).
         """
+        # This will show in the terminal running 'reflex run'
+        print("DEBUG: load_projects method invoked") 
+        async with httpx.AsyncClient() as client:
+            response = await client.get("http://localhost:8000/api/projects")
+            print(f"DEBUG: Data received: {response.json()}")
+            self.projects = response.json()
+
         self.is_loading = True
         yield
 
@@ -215,3 +222,8 @@ class AppState(rx.State):
                 yield rx.toast.error(f"Network error: {exc}")
 
         self.is_loading = False
+    
+    @rx.event
+    def on_mount(self):
+        print("DEBUG: Component mounted, triggering load_projects")
+        return self.load_projects()
