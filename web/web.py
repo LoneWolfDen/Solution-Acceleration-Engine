@@ -39,5 +39,6 @@ app.add_page(
     route="/",
     title="Contexta",
     description="Solution Validation Pipeline",
-    on_load=AppState.load_projects,
+    #on_load=AppState.load_projects,
+    on_load=AppState.on_mount,
 )
