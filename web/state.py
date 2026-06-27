@@ -1,444 +1,285 @@
-"""web/state.py — Central application state for the Contexta Web UI.
+"""
+web/state.py — AppState: the sole bridge between the API and the UI.
 
-MockMode
---------
-MOCK_MODE = True  → load_data() and select_review() use _get_mock_data().
-                    No database, no network, no httpx. Fully deterministic.
+Design rules enforced here:
+  1. AppState is the ONLY place that calls the FastAPI backend.
+  2. Components receive data exclusively via state vars or computed vars.
+  3. No business logic lives in components; all transformations happen here.
+  4. Toast notifications are triggered imperatively from event handlers using
+     rx.toast.error / rx.toast.warning — no global string state needed.
 
-MOCK_MODE = False → Stub placeholders are in place for future httpx calls
-                    to the REST API once a stable backend connection exists.
+State hierarchy:
+  projects          ← populated by load_projects() on page load
+  selected_project  ← populated by select_project(project_id)
+  selected_node     ← populated by select_node(node_id)
 
-Flip the constant at line 22 when moving to staging.
+Selection keys:
+  selected_project_id  ← drives sidebar highlight + expansion
+  selected_version_id  ← drives version row expansion + node list filter
+  selected_node_id     ← drives node row highlight + detail pane render
+
+Computed vars (server-side, cached):
+  versions_for_selected_project  ← list[dict] from selected_project["versions"]
+  nodes_for_selected_version     ← list[dict] filtered by selected_version_id
+  selected_node_name             ← str, safe empty fallback
+  selected_node_layer_type       ← str, safe empty fallback
+  selected_node_created_at       ← str, safe empty fallback
+  selected_node_content_json     ← str, pretty-printed JSON of content_markdown
+
+API URL resolution
+──────────────────
+All httpx calls originate from the Reflex backend process (server-side), so
+the API URL must be reachable from inside the container / Codespace — NOT from
+the browser.  "localhost:8000" is correct for server-to-server calls inside a
+single container or the same Codespace VM.
+
+Override via CONTEXTA_API_URL if the topology differs (e.g. separate containers
+in docker-compose, or external FastAPI deployment).
+
+Codespace auto-detection:
+  If CODESPACE_NAME is set, the FastAPI public URL is
+  https://{CODESPACE_NAME}-8000.app.github.dev — useful as a fallback, but
+  server-to-server should still prefer http://localhost:8000 when both processes
+  share the same network namespace.
 """
 
 from __future__ import annotations
 
-from typing import Any
+import json
+import logging
+import os
 
+import httpx
 import reflex as rx
 
-# ── Single toggle to switch between mock and live data ────────────────────────
-MOCK_MODE: bool = True
+# ── Logging ───────────────────────────────────────────────────────────────────
+# Logs appear in the terminal running "reflex run", not in the browser console.
+_log = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 
+# ── API base URL ───────────────────────────────────────────────────────────────
+# AppState event handlers call FastAPI server-side via httpx.
+# Prefer CONTEXTA_API_URL env var; default to localhost for single-container.
+_API_BASE: str = os.environ.get("CONTEXTA_API_URL", "http://localhost:8000")
+_HTTP_TIMEOUT: float = 10.0
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Mock data factory
-# ─────────────────────────────────────────────────────────────────────────────
+_log.info("AppState: API base resolved to %s", _API_BASE)
 
-def _get_mock_data() -> dict[str, Any]:
-    """Return a fully populated data structure that mirrors the SQLite schema.
-
-    Hierarchy: ProjectRow → VersionRow → NodeRow
-    Each NodeRow's payload mirrors ReviewNodePayload (stored in
-    nodes.content_markdown in production).
-
-    Returns
-    -------
-    dict with two keys:
-        "projects"       — list[ProjectDict] with nested versions and nodes
-        "review_payload" — sample ReviewNodePayload for the pre-selected node
-    """
-    return {
-        "projects": [
-            {
-                "id": "proj-001",
-                "name": "Banking Transformation Platform",
-                "global_tags": ["banking", "fintech"],
-                "versions": [
-                    {
-                        "id": "ver-001",
-                        "project_id": "proj-001",
-                        "name": "v1.0 — Initial Review",
-                        "description": (
-                            "Baseline assessment of the core banking platform "
-                            "migration scope."
-                        ),
-                        "created_at": "2026-06-01T10:00:00+00:00",
-                        "nodes": [
-                            {
-                                "id": "node-001",
-                                "project_id": "proj-001",
-                                "version_id": "ver-001",
-                                "parent_id": "",
-                                "layer_type": "exploration",
-                                "node_name": "Architecture Dimension Review",
-                                "created_at": "2026-06-01T10:30:00+00:00",
-                            },
-                            {
-                                "id": "node-002",
-                                "project_id": "proj-001",
-                                "version_id": "ver-001",
-                                "parent_id": "",
-                                "layer_type": "exploration",
-                                "node_name": "Risk Dimension Review",
-                                "created_at": "2026-06-01T10:45:00+00:00",
-                            },
-                            {
-                                "id": "node-003",
-                                "project_id": "proj-001",
-                                "version_id": "ver-001",
-                                "parent_id": "node-001",
-                                "layer_type": "synthesis",
-                                "node_name": "Layer 2 — Reconciliation Report",
-                                "created_at": "2026-06-01T11:00:00+00:00",
-                            },
-                        ],
-                    },
-                    {
-                        "id": "ver-002",
-                        "project_id": "proj-001",
-                        "name": "v2.0 — Post-Remediation Review",
-                        "description": (
-                            "Second pass after scope modifications were applied."
-                        ),
-                        "created_at": "2026-06-15T09:00:00+00:00",
-                        "nodes": [
-                            {
-                                "id": "node-004",
-                                "project_id": "proj-001",
-                                "version_id": "ver-002",
-                                "parent_id": "",
-                                "layer_type": "exploration",
-                                "node_name": "Architecture Dimension Review",
-                                "created_at": "2026-06-15T09:30:00+00:00",
-                            },
-                        ],
-                    },
-                ],
-            },
-            {
-                "id": "proj-002",
-                "name": "Drone Fleet Management System",
-                "global_tags": ["aerospace", "iot"],
-                "versions": [
-                    {
-                        "id": "ver-003",
-                        "project_id": "proj-002",
-                        "name": "v1.0 — Scoping Review",
-                        "description": (
-                            "Initial feasibility assessment for drone fleet management."
-                        ),
-                        "created_at": "2026-06-10T14:00:00+00:00",
-                        "nodes": [
-                            {
-                                "id": "node-005",
-                                "project_id": "proj-002",
-                                "version_id": "ver-003",
-                                "parent_id": "",
-                                "layer_type": "exploration",
-                                "node_name": "Scope Dimension Review",
-                                "created_at": "2026-06-10T14:30:00+00:00",
-                            },
-                            {
-                                "id": "node-006",
-                                "project_id": "proj-002",
-                                "version_id": "ver-003",
-                                "parent_id": "",
-                                "layer_type": "exploration",
-                                "node_name": "NFR Dimension Review",
-                                "created_at": "2026-06-10T15:00:00+00:00",
-                            },
-                        ],
-                    },
-                ],
-            },
-            {
-                "id": "proj-003",
-                "name": "Pharma Clinical Trials Platform",
-                "global_tags": ["pharma", "compliance", "healthcare"],
-                "versions": [
-                    {
-                        "id": "ver-004",
-                        "project_id": "proj-003",
-                        "name": "v1.0 — Compliance Review",
-                        "description": "Regulatory and NFR compliance assessment.",
-                        "created_at": "2026-06-20T08:00:00+00:00",
-                        "nodes": [
-                            {
-                                "id": "node-007",
-                                "project_id": "proj-003",
-                                "version_id": "ver-004",
-                                "parent_id": "",
-                                "layer_type": "exploration",
-                                "node_name": "Commercial Dimension Review",
-                                "created_at": "2026-06-20T08:30:00+00:00",
-                            },
-                        ],
-                    },
-                ],
-            },
-        ],
-        # ── Sample ReviewNodePayload ─────────────────────────────────────────
-        # Mirrors: ReviewNodePayload(dimension, findings, overall_confidence,
-        #          raw_llm_response) plus context fields for the UI header.
-        "review_payload": {
-            "node_id": "node-001",
-            "node_name": "Architecture Dimension Review",
-            "version_name": "v1.0 — Initial Review",
-            "project_name": "Banking Transformation Platform",
-            "dimension": "Architecture",
-            "overall_confidence": "AMBER",
-            "raw_llm_response": (
-                "LLM response stored verbatim for audit trail. "
-                "Structured findings are extracted into the findings list below."
-            ),
-            "findings": [
-                {
-                    "dimension": "Architecture",
-                    "confidence": "AMBER",
-                    "summary": (
-                        "Microservices decomposition lacks defined service boundaries"
-                    ),
-                    "detail": (
-                        "The proposed architecture describes a microservices pattern "
-                        "but does not define explicit service boundaries, ownership, "
-                        "or inter-service communication contracts. This creates "
-                        "ambiguity in the delivery timeline and resource allocation."
-                    ),
-                    "citations": [
-                        {
-                            "file_path": "banking_technical_architecture.md",
-                            "line_start": 14,
-                            "line_end": 28,
-                            "citation_type": "Direct Reference",
-                            "excerpt": (
-                                "Services will be decomposed by domain capability..."
-                            ),
-                        }
-                    ],
-                    "mitigation_routing": "Risk Register",
-                },
-                {
-                    "dimension": "Architecture",
-                    "confidence": "RED",
-                    "summary": (
-                        "No data migration strategy for legacy core banking system"
-                    ),
-                    "detail": (
-                        "The Statement of Work omits any reference to a data "
-                        "migration plan for the existing Temenos T24 core banking "
-                        "system. Given the 18-month timeline, this represents a "
-                        "critical delivery risk that must be addressed before sign-off."
-                    ),
-                    "citations": [
-                        {
-                            "file_path": "banking_statement_of_work.md",
-                            "line_start": 42,
-                            "line_end": 55,
-                            "citation_type": "Advised in Relation",
-                            "excerpt": (
-                                "Data migration activities to be scoped in Phase 2..."
-                            ),
-                        }
-                    ],
-                    "mitigation_routing": "Scope Modification",
-                },
-                {
-                    "dimension": "Architecture",
-                    "confidence": "GREEN",
-                    "summary": (
-                        "Cloud infrastructure selection is appropriate for the workload"
-                    ),
-                    "detail": (
-                        "AWS EKS with RDS Aurora PostgreSQL is a well-validated "
-                        "pattern for high-availability financial services workloads. "
-                        "The proposed auto-scaling configuration aligns with peak "
-                        "transaction volume estimates."
-                    ),
-                    "citations": [
-                        {
-                            "file_path": "banking_technical_architecture.md",
-                            "line_start": 67,
-                            "line_end": 74,
-                            "citation_type": "Direct Reference",
-                            "excerpt": (
-                                "AWS EKS cluster with node auto-scaling enabled..."
-                            ),
-                        }
-                    ],
-                    "mitigation_routing": "Ignored",
-                },
-            ],
-        },
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Application state
-# ─────────────────────────────────────────────────────────────────────────────
 
 class AppState(rx.State):
-    """Central state for the Contexta Web UI.
+    # Use the full public URL of your backend (port 8000)
+    _API_BASE: str = "https://glorious-memory-jr5vjjp7q4x42pq94-8000.app.github.dev"
 
-    All state vars are JSON-serialisable (list[dict], str, bool) so Reflex
-    can sync them to the browser without additional serialisation steps.
+    """
+    Central application state.
 
-    Navigation model
-    ----------------
-    selected_node_id   — the id of the currently highlighted sidebar item
-    selected_node_type — "project" | "version" | "review" | ""
-    The content pane uses these two vars to decide what to render.
+    All fields below are the authoritative UI state.  Event handlers update
+    them; components read them.  Nothing else mutates these vars.
     """
 
-    # ── Project tree (Projects → Versions → Nodes) ────────────────────────────
-    projects: list[dict] = []
+    # ── API data ──────────────────────────────────────────────────────────────
+    projects: list[dict] = []        # GET /api/projects
+    selected_project: dict = {}      # GET /api/projects/{id}
+    selected_node: dict = {}         # GET /api/nodes/{id}
 
-    # ── Sidebar selection ─────────────────────────────────────────────────────
+    # ── Selection keys ────────────────────────────────────────────────────────
+    selected_project_id: str = ""
+    selected_version_id: str = ""
     selected_node_id: str = ""
-    # "project" | "version" | "review" | ""
-    selected_node_type: str = ""
 
-    # ── Content pane data ─────────────────────────────────────────────────────
-    # review_payload mirrors ReviewNodePayload + UI context fields
-    review_payload: dict = {}
-    # version_detail mirrors VersionRow + derived counts
-    version_detail: dict = {}
-    # project_detail mirrors ProjectRow + derived counts
-    project_detail: dict = {}
-
-    # ── UI state ──────────────────────────────────────────────────────────────
+    # ── Loading indicator ─────────────────────────────────────────────────────
     is_loading: bool = False
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Lifecycle
-    # ─────────────────────────────────────────────────────────────────────────
+    # ── Computed vars (cached; auto-deps tracked by Reflex) ───────────────────
 
-    def load_data(self) -> None:
-        """Load the project tree.
+    @rx.var(cache=True)
+    def versions_for_selected_project(self) -> list[dict]:
+        """Versions belonging to the currently expanded project."""
+        return self.selected_project.get("versions", [])
 
-        MockMode path  → _get_mock_data() — no I/O, fully deterministic.
-        Live path      → httpx GET /api/projects (stub; wire up post-staging).
+    @rx.var(cache=True)
+    def nodes_for_selected_version(self) -> list[dict]:
+        """Nodes belonging to the currently expanded version."""
+        if not self.selected_project or not self.selected_version_id:
+            return []
+        return [
+            n
+            for n in self.selected_project.get("nodes", [])
+            if n.get("version_id") == self.selected_version_id
+        ]
 
-        Also pre-selects the first review node so the content pane is
-        never empty on first render.
+    @rx.var(cache=True)
+    def selected_node_name(self) -> str:
+        return self.selected_node.get("node_name", "")
+
+    @rx.var(cache=True)
+    def selected_node_layer_type(self) -> str:
+        return self.selected_node.get("layer_type", "")
+
+    @rx.var(cache=True)
+    def selected_node_created_at(self) -> str:
+        return self.selected_node.get("created_at", "")
+
+    @rx.var(cache=True)
+    def selected_node_content_json(self) -> str:
         """
+        Pretty-printed JSON string of the node's content_markdown field.
+
+        content_markdown holds a raw JSON string (the serialised
+        ReviewNodePayload).  We parse it here so the detail pane can show
+        nicely indented JSON rather than an escaped one-liner.
+        Falls back to the raw string when the content is not valid JSON.
+        """
+        content: str = self.selected_node.get("content_markdown", "")
+        if not content:
+            return ""
+        try:
+            parsed = json.loads(content)
+            return json.dumps(parsed, indent=2)
+        except (json.JSONDecodeError, TypeError):
+            return content
+
+    # ── Event handlers ────────────────────────────────────────────────────────
+
+    async def load_projects(self):
+        """
+        Called via on_load in web.py when the index page is first rendered.
+        Chains into load_projects so a single lifecycle hook triggers the
+        initial data fetch.
+        """
+        # This will show in the terminal running 'reflex run'
+        print("DEBUG: load_projects method invoked") 
+        async with httpx.AsyncClient() as client:
+            response = await client.get("http://localhost:8000/api/projects")
+            print(f"DEBUG: Data received: {response.json()}")
+            self.projects = response.json()
+
         self.is_loading = True
+        yield
 
-        if MOCK_MODE:
-            data = _get_mock_data()
-            self.projects = data["projects"]
-            self.review_payload = data["review_payload"]
-
-            # Pre-select first review node for immediate visual feedback.
-            if self.projects:
-                first_proj = self.projects[0]
-                first_ver = (
-                    first_proj["versions"][0]
-                    if first_proj["versions"]
-                    else None
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.get(f"{_API_BASE}/api/projects")
+                resp.raise_for_status()
+                self.projects = resp.json()
+                _log.info(
+                    "load_projects: success — received %d project(s)",
+                    len(self.projects),
                 )
-                if first_ver and first_ver["nodes"]:
-                    first_node = first_ver["nodes"][0]
-                    self.selected_node_id = first_node["id"]
-                    self.selected_node_type = "review"
-        else:
-            # ── Live path (activate when MOCK_MODE = False) ───────────────────
-            # import httpx
-            # async with httpx.AsyncClient() as client:
-            #     resp = await client.get("http://localhost:8001/api/projects")
-            #     resp.raise_for_status()
-            #     self.projects = resp.json()
-            pass
+            except httpx.HTTPStatusError as exc:
+                _log.error(
+                    "load_projects: HTTP %s from API — %s",
+                    exc.response.status_code,
+                    exc.response.text,
+                )
+                error = exc.response.json().get("error", "Failed to load projects.")
+                yield rx.toast.error(error)
+            except httpx.RequestError as exc:
+                _log.error(
+                    "load_projects: network error reaching %s — %s",
+                    _API_BASE,
+                    exc,
+                )
+                yield rx.toast.error(
+                    f"Cannot reach API at {_API_BASE}. Is the server running? ({exc})"
+                )
 
         self.is_loading = False
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Navigation event handlers
-    # Sidebar calls these with the id of the clicked item.
-    # Each handler updates selected_node_id, selected_node_type, and the
-    # matching detail dict so the content pane has data to render immediately.
-    # ─────────────────────────────────────────────────────────────────────────
+    async def select_project(self, project_id: str) -> None:
+        """
+        Expand a project in the sidebar and fetch its versions + nodes.
+        Clicking an already-selected project collapses it.
+        """
+        if project_id == self.selected_project_id:
+            # Toggle: collapse
+            self.selected_project_id = ""
+            self.selected_project = {}
+            self.selected_version_id = ""
+            self.selected_node_id = ""
+            self.selected_node = {}
+            return
 
-    def select_project(self, project_id: str) -> None:
-        """Select a project node and populate project_detail."""
-        self.selected_node_id = project_id
-        self.selected_node_type = "project"
+        self.selected_project_id = project_id
+        self.selected_version_id = ""
+        self.selected_node_id = ""
+        self.selected_node = {}
+        self.is_loading = True
+        yield
 
-        for project in self.projects:
-            if project["id"] == project_id:
-                self.project_detail = {
-                    "id": project["id"],
-                    "name": project["name"],
-                    "global_tags": project.get("global_tags", []),
-                    "version_count": len(project.get("versions", [])),
-                }
-                return
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.get(f"{_API_BASE}/api/projects/{project_id}")
+                resp.raise_for_status()
+                self.selected_project = resp.json()
+            except httpx.HTTPStatusError as exc:
+                _log.error(
+                    "select_project: HTTP %s — %s",
+                    exc.response.status_code,
+                    exc.response.text,
+                )
+                error = exc.response.json().get(
+                    "error", f"Failed to load project '{project_id}'."
+                )
+                yield rx.toast.error(error)
+            except httpx.RequestError as exc:
+                _log.error("select_project: network error — %s", exc)
+                yield rx.toast.error(f"Network error: {exc}")
+
+        self.is_loading = False
 
     def select_version(self, version_id: str) -> None:
-        """Select a version node and populate version_detail."""
-        self.selected_node_id = version_id
-        self.selected_node_type = "version"
-
-        for project in self.projects:
-            for version in project.get("versions", []):
-                if version["id"] == version_id:
-                    self.version_detail = {
-                        "id": version["id"],
-                        "name": version["name"],
-                        "description": version.get("description", ""),
-                        "created_at": version["created_at"],
-                        "node_count": len(version.get("nodes", [])),
-                        "project_name": project["name"],
-                    }
-                    return
-
-    def select_review(self, node_id: str) -> None:
-        """Select a review node and load its payload.
-
-        MockMode: all nodes return the same sample payload with the
-        node_id and node_name updated for accurate header display.
-        Live mode: httpx GET /api/nodes/{node_id}/payload (stub).
         """
-        self.selected_node_id = node_id
-        self.selected_node_type = "review"
-
-        if MOCK_MODE:
-            data = _get_mock_data()
-            payload = dict(data["review_payload"])
-            payload["node_id"] = node_id
-
-            # Update context fields from the tree for accurate display.
-            for project in self.projects:
-                for version in project.get("versions", []):
-                    for node in version.get("nodes", []):
-                        if node["id"] == node_id:
-                            payload["node_name"] = node["node_name"]
-                            payload["version_name"] = version["name"]
-                            payload["project_name"] = project["name"]
-                            break
-
-            self.review_payload = payload
+        Expand a version row to reveal its nodes.
+        No API call — the nodes are already in selected_project.
+        Clicking an already-selected version collapses it.
+        """
+        if version_id == self.selected_version_id:
+            self.selected_version_id = ""
         else:
-            # TODO: httpx GET /api/nodes/{node_id}/payload
-            pass
+            self.selected_version_id = version_id
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Computed vars — used by content_pane.py to decide which pane to show
-    # ─────────────────────────────────────────────────────────────────────────
+        # Clear node selection when switching versions.
+        self.selected_node_id = ""
+        self.selected_node = {}
 
-    @rx.var
-    def show_review_pane(self) -> bool:
-        return self.selected_node_type == "review"
+    async def select_node(self, node_id: str) -> None:
+        """
+        Fetch a node's full detail and display it in the content pane.
+        Clicking an already-selected node is a no-op.
+        """
+        if node_id == self.selected_node_id:
+            return
 
-    @rx.var
-    def show_version_pane(self) -> bool:
-        return self.selected_node_type == "version"
+        self.selected_node_id = node_id
+        self.is_loading = True
+        yield
 
-    @rx.var
-    def show_project_pane(self) -> bool:
-        return self.selected_node_type == "project"
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.get(f"{_API_BASE}/api/nodes/{node_id}")
+                resp.raise_for_status()
+                self.selected_node = resp.json()
+            except httpx.HTTPStatusError as exc:
+                _log.error(
+                    "select_node: HTTP %s — %s",
+                    exc.response.status_code,
+                    exc.response.text,
+                )
+                error = exc.response.json().get(
+                    "error", f"Failed to load node '{node_id}'."
+                )
+                yield rx.toast.error(error)
+            except httpx.RequestError as exc:
+                _log.error("select_node: network error — %s", exc)
+                yield rx.toast.error(f"Network error: {exc}")
 
-    @rx.var
-    def mock_mode_label(self) -> str:
-        """Text label shown in the header banner."""
-        return "MOCK MODE" if MOCK_MODE else "LIVE"
-
-    @rx.var
-    def current_findings(self) -> list[dict]:
-        """Findings list from review_payload. Typed for safe rx.foreach use."""
-        return self.review_payload.get("findings", [])
-
-    @rx.var
-    def current_project_tags(self) -> list[str]:
-        """Tags from project_detail. Typed for safe rx.foreach use."""
-        return self.project_detail.get("global_tags", [])
+        self.is_loading = False
+    
+    @rx.event
+    def on_mount(self):
+        print("DEBUG: Component mounted, triggering load_projects")
+        return self.load_projects()

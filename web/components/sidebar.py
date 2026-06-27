@@ -1,219 +1,208 @@
-"""web/components/sidebar.py — Three-level navigation tree.
+"""
+web/components/sidebar.py — Project / Version / Node tree view.
 
-Renders: Projects → Versions → Nodes (reviews).
+Pure renderer: reads from AppState, calls AppState event handlers.
+No logic lives here.
 
-Each level is built with rx.foreach so the tree is fully data-driven
-from AppState.projects.  Clicking any item calls the matching event
-handler which updates selected_node_id and selected_node_type — those
-two vars drive which pane the content area shows.
-
-Selection highlight: the clicked item gets an indigo background.
-All items show a hover state.
+Tree hierarchy:
+  Projects (always visible)
+    └── Versions  (visible when project is expanded)
+          └── Nodes     (visible when version is expanded)
 """
 
 import reflex as rx
 
-from web.state import AppState
-
-# ── Colour tokens ─────────────────────────────────────────────────────────────
-_SELECTED_BG = "#e0e7ff"   # indigo-100
-_HOVER_BG = "#f3f4f6"      # gray-100
-_SIDEBAR_BG = "#f9fafb"    # gray-50
-_BORDER = "#e5e7eb"        # gray-200
-_TEXT_PRIMARY = "#111827"   # gray-900
-_TEXT_SECONDARY = "#6b7280" # gray-500
-
-# ── Layer-type icon map (unicode fallbacks — no external icon dep needed) ─────
-_LAYER_ICONS: dict[str, str] = {
-    "exploration": "○",
-    "synthesis": "◆",
-}
+from ..state import AppState
 
 
-def _node_row(node: dict) -> rx.Component:
-    """Render a single NodeRow as a clickable leaf item (deepest indent)."""
+# ── Leaf: a single node row ───────────────────────────────────────────────────
+
+def _render_node(node: dict) -> rx.Component:
+    """Render a node as a clickable leaf row inside an expanded version."""
     is_selected = AppState.selected_node_id == node["id"]
-
-    layer_icon = rx.match(
-        node["layer_type"],
-        ("exploration", rx.text("○", color=_TEXT_SECONDARY, font_size="0.65rem")),
-        ("synthesis",   rx.text("◆", color="#6366f1",       font_size="0.65rem")),
-        rx.text("·",    color=_TEXT_SECONDARY, font_size="0.65rem"),
-    )
-
     return rx.box(
-        rx.hstack(
-            layer_icon,
-            rx.text(
-                node["node_name"],
-                font_size="0.78rem",
-                color=rx.cond(is_selected, "#3730a3", _TEXT_PRIMARY),
-                overflow="hidden",
-                text_overflow="ellipsis",
-                white_space="nowrap",
-            ),
-            align="center",
-            spacing="1",
-            width="100%",
-            overflow="hidden",
-        ),
-        on_click=AppState.select_review(node["id"]),
-        padding_left="2.75rem",
-        padding_right="0.5rem",
-        padding_y="0.3rem",
-        cursor="pointer",
-        border_radius="4px",
-        background_color=rx.cond(is_selected, _SELECTED_BG, "transparent"),
-        _hover={
-            "background_color": rx.cond(is_selected, _SELECTED_BG, _HOVER_BG),
-        },
-        width="100%",
-    )
-
-
-def _version_row(version: dict) -> rx.Component:
-    """Render a VersionRow header + its nodes (always expanded)."""
-    is_selected = AppState.selected_node_id == version["id"]
-
-    return rx.vstack(
-        # ── Version header ────────────────────────────────────────────────────
-        rx.box(
+        rx.button(
             rx.hstack(
-                rx.text(
-                    "⎇",
-                    font_size="0.7rem",
-                    color=rx.cond(is_selected, "#3730a3", _TEXT_SECONDARY),
-                ),
-                rx.text(
-                    version["name"],
-                    font_size="0.82rem",
-                    font_weight="500",
-                    color=rx.cond(is_selected, "#3730a3", _TEXT_PRIMARY),
-                    overflow="hidden",
-                    text_overflow="ellipsis",
-                    white_space="nowrap",
-                ),
-                align="center",
-                spacing="1",
-                width="100%",
-                overflow="hidden",
-            ),
-            on_click=AppState.select_version(version["id"]),
-            padding_left="1.5rem",
-            padding_right="0.5rem",
-            padding_y="0.35rem",
-            cursor="pointer",
-            border_radius="4px",
-            background_color=rx.cond(is_selected, _SELECTED_BG, "transparent"),
-            _hover={
-                "background_color": rx.cond(is_selected, _SELECTED_BG, _HOVER_BG),
-            },
-            width="100%",
-        ),
-        # ── Node list (nested foreach) ────────────────────────────────────────
-        rx.foreach(version["nodes"], _node_row),
-        width="100%",
-        spacing="0",
-        align="start",
-        gap="0",
-    )
-
-
-def _project_row(project: dict) -> rx.Component:
-    """Render a ProjectRow header + its versions (always expanded)."""
-    is_selected = AppState.selected_node_id == project["id"]
-
-    return rx.vstack(
-        # ── Project header ────────────────────────────────────────────────────
-        rx.box(
-            rx.hstack(
-                rx.text(
-                    "▸",
-                    font_size="0.75rem",
-                    color=rx.cond(is_selected, "#3730a3", _TEXT_SECONDARY),
-                ),
-                rx.text(
-                    project["name"],
-                    font_size="0.88rem",
-                    font_weight="600",
-                    color=rx.cond(is_selected, "#3730a3", _TEXT_PRIMARY),
-                    overflow="hidden",
-                    text_overflow="ellipsis",
-                    white_space="nowrap",
-                ),
+                rx.icon("file-text", size=13),
+                rx.text(node["node_name"], size="1", truncate=True),
                 align="center",
                 spacing="2",
                 width="100%",
-                overflow="hidden",
             ),
-            on_click=AppState.select_project(project["id"]),
-            padding_x="0.5rem",
-            padding_y="0.4rem",
-            cursor="pointer",
-            border_radius="6px",
-            background_color=rx.cond(is_selected, _SELECTED_BG, "transparent"),
-            _hover={
-                "background_color": rx.cond(is_selected, _SELECTED_BG, _HOVER_BG),
-            },
+            variant="ghost",
             width="100%",
+            style={"justify_content": "flex-start"},
+            background=rx.cond(is_selected, "var(--accent-3)", "transparent"),
+            color=rx.cond(is_selected, "var(--accent-11)", "inherit"),
+            on_click=AppState.select_node(node["id"]),
         ),
-        # ── Version list (nested foreach) ─────────────────────────────────────
-        rx.foreach(project["versions"], _version_row),
+        padding_left="2.5rem",
         width="100%",
-        spacing="0",
-        align="start",
-        gap="0",
-        padding_bottom="0.75rem",
     )
 
 
+# ── Level 2: a single version row, collapsible ───────────────────────────────
+
+def _render_version(version: dict) -> rx.Component:
+    """
+    Render a version row.  Clicking expands/collapses the node list beneath it.
+    The node list always reads from AppState.nodes_for_selected_version (already
+    filtered to the selected version) so the content matches the row that is open.
+    """
+    is_open = AppState.selected_version_id == version["id"]
+    return rx.vstack(
+        rx.button(
+            rx.hstack(
+                rx.cond(
+                    is_open,
+                    rx.icon("chevron-down", size=13),
+                    rx.icon("chevron-right", size=13),
+                ),
+                rx.icon("tag", size=13),
+                rx.text(version["name"], size="1", truncate=True),
+                align="center",
+                spacing="2",
+                width="100%",
+            ),
+            variant="ghost",
+            width="100%",
+            style={"justify_content": "flex-start"},
+            on_click=AppState.select_version(version["id"]),
+        ),
+        rx.cond(
+            is_open,
+            rx.vstack(
+                rx.foreach(AppState.nodes_for_selected_version, _render_node),
+                width="100%",
+                spacing="0",
+            ),
+            rx.fragment(),
+        ),
+        width="100%",
+        spacing="0",
+    )
+
+
+# ── Level 1: a single project row, collapsible ───────────────────────────────
+
+def _render_project(project: dict) -> rx.Component:
+    """
+    Render a project row.  Clicking expands/collapses the version list and
+    triggers an API fetch for that project's detail data.
+    """
+    is_open = AppState.selected_project_id == project["id"]
+    return rx.vstack(
+        rx.button(
+            rx.hstack(
+                rx.cond(
+                    is_open,
+                    rx.icon("folder-open", size=15),
+                    rx.icon("folder", size=15),
+                ),
+                rx.text(project["name"], size="2", weight="medium", truncate=True),
+                align="center",
+                spacing="2",
+                width="100%",
+            ),
+            variant="ghost",
+            width="100%",
+            style={"justify_content": "flex-start"},
+            on_click=AppState.select_project(project["id"]),
+        ),
+        rx.cond(
+            is_open,
+            rx.box(
+                rx.foreach(
+                    AppState.versions_for_selected_project,
+                    _render_version,
+                ),
+                padding_left="1rem",
+                width="100%",
+            ),
+            rx.fragment(),
+        ),
+        width="100%",
+        spacing="0",
+    )
+
+
+# ── Sidebar shell ─────────────────────────────────────────────────────────────
+
 def sidebar() -> rx.Component:
-    """Full sidebar panel with the project tree and a mock-mode status badge."""
+    """
+    Fixed-width left panel.  Displays the app header, a loading indicator,
+    and the scrollable project tree.
+    """
     return rx.box(
         rx.vstack(
-            # ── Header ────────────────────────────────────────────────────────
+            # ── Header ──────────────────────────────────────────────────────
+            rx.hstack(
+                rx.icon("layout-dashboard", size=18),
+                rx.heading("Contexta", size="4"),
+                align="center",
+                spacing="2",
+                padding_x="1rem",
+                padding_y="0.875rem",
+                width="100%",
+            ),
+            rx.separator(width="100%"),
+            # ── Section label + loading spinner ─────────────────────────────
             rx.hstack(
                 rx.text(
                     "PROJECTS",
-                    font_size="0.68rem",
-                    font_weight="700",
-                    color=_TEXT_SECONDARY,
+                    size="1",
+                    weight="bold",
+                    color_scheme="gray",
                     letter_spacing="0.08em",
                 ),
+                rx.spacer(),
                 rx.cond(
-                    AppState.mock_mode_label == "MOCK MODE",
-                    rx.badge(
-                        "MOCK",
-                        color_scheme="orange",
-                        variant="soft",
-                        font_size="0.6rem",
-                    ),
-                    rx.box(),
+                    AppState.is_loading,
+                    rx.spinner(size="1"),
+                    rx.fragment(),
                 ),
-                align="center",
-                justify="between",
+                padding_x="1rem",
+                padding_top="0.75rem",
+                padding_bottom="0.375rem",
                 width="100%",
-                padding_bottom="0.5rem",
-                border_bottom=f"1px solid {_BORDER}",
-                margin_bottom="0.25rem",
             ),
-            # ── Tree ──────────────────────────────────────────────────────────
-            rx.cond(
-                AppState.is_loading,
-                rx.text("Loading…", color=_TEXT_SECONDARY, font_size="0.85rem"),
-                rx.foreach(AppState.projects, _project_row),
+            # ── Scrollable project tree ──────────────────────────────────────
+            rx.scroll_area(
+                rx.vstack(
+                    rx.foreach(AppState.projects, _render_project),
+                    # Empty state when no projects are loaded
+                    rx.cond(
+                        AppState.projects.length() == 0,
+                        rx.center(
+                            rx.text(
+                                "No projects found.",
+                                size="1",
+                                color_scheme="gray",
+                            ),
+                            padding_y="2rem",
+                            width="100%",
+                        ),
+                        rx.fragment(),
+                    ),
+                    width="100%",
+                    spacing="0",
+                    align_items="stretch",
+                    padding="0.5rem",
+                ),
+                flex="1",
+                width="100%",
+                type="auto",
             ),
+            height="100vh",
             width="100%",
-            align="start",
             spacing="0",
-            gap="0",
+            align_items="stretch",
         ),
         width="280px",
         min_width="280px",
         height="100vh",
-        overflow_y="auto",
-        background_color=_SIDEBAR_BG,
-        border_right=f"1px solid {_BORDER}",
-        padding="1rem",
+        border_right="1px solid var(--gray-4)",
+        background_color="var(--gray-1)",
+        overflow="hidden",
         flex_shrink="0",
     )
