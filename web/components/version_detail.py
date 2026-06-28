@@ -176,8 +176,7 @@ def version_detail() -> rx.Component:
                 rx.vstack(
                     _section_label("paperclip", "Linked Artifacts"),
                     rx.cond(
-                        #version["artifacts"].length() > 0,
-                        rx.len(version["artifacts"]) > 0,
+                        version["artifacts"].to(list).length() > 0,
                         rx.vstack(
                             rx.foreach(version["artifacts"], _artifact_row),
                             spacing="2",
