@@ -1,236 +1,124 @@
-"""web/components/finding_card.py — Single finding display card.
+"""
+web/components/finding_card.py — FindingCard component.
 
-Renders one IssueFinding dict produced by _get_mock_data() (or the live
-pipeline).  Confidence level drives the card's accent colour:
+Renders a single FindingItem dict from the ReviewPayloadResponse:
+  { finding_id, type, severity, text, source_artifact, citation }
 
-    RED    →  red border + badge
-    AMBER  →  amber/orange border + badge
-    GREEN  →  green border + badge
-
-Used inside content_pane.py via rx.foreach(AppState.current_findings, ...).
+Severity drives the card's accent colour:
+  HIGH    → red border + badge
+  MEDIUM  → amber/orange border + badge
+  LOW     → green border + badge
 """
 
 import reflex as rx
 
 
-# ---------------------------------------------------------------------------
-# Confidence colour maps
-# ---------------------------------------------------------------------------
+# ── Colour helpers ────────────────────────────────────────────────────────────
 
-_CONFIDENCE_BORDER: dict[str, str] = {
-    "RED": "#ef4444",
-    "AMBER": "#f59e0b",
-    "GREEN": "#22c55e",
-}
-
-_CONFIDENCE_BADGE_SCHEME: dict[str, str] = {
-    "RED": "red",
-    "AMBER": "yellow",
-    "GREEN": "green",
-}
-
-
-def _confidence_border(confidence: rx.Var) -> rx.Var:
-    """Return the left-border colour string for a given confidence var."""
+def _severity_border(severity: rx.Var) -> rx.Var:
     return rx.match(
-        confidence,
-        ("RED", _CONFIDENCE_BORDER["RED"]),
-        ("AMBER", _CONFIDENCE_BORDER["AMBER"]),
-        ("GREEN", _CONFIDENCE_BORDER["GREEN"]),
-        "#475569",
+        severity,
+        ("HIGH", "#ef4444"),
+        ("MEDIUM", "#f59e0b"),
+        ("LOW", "#22c55e"),
+        "#64748b",
     )
 
 
-def _confidence_badge(confidence: rx.Var) -> rx.Component:
-    """Colour-coded confidence badge (RED / AMBER / GREEN)."""
+def _severity_badge(severity: rx.Var) -> rx.Component:
     return rx.match(
-        confidence,
+        severity,
         (
-            "RED",
-            rx.badge(
-                "RED",
-                color_scheme="red",
-                variant="solid",
-                font_size="0.65rem",
-                font_weight="700",
-            ),
+            "HIGH",
+            rx.badge("HIGH", color_scheme="red", variant="solid", size="1"),
         ),
         (
-            "AMBER",
-            rx.badge(
-                "AMBER",
-                color_scheme="yellow",
-                variant="solid",
-                font_size="0.65rem",
-                font_weight="700",
-            ),
+            "MEDIUM",
+            rx.badge("MEDIUM", color_scheme="yellow", variant="solid", size="1"),
         ),
         (
-            "GREEN",
-            rx.badge(
-                "GREEN",
-                color_scheme="green",
-                variant="solid",
-                font_size="0.65rem",
-                font_weight="700",
-            ),
+            "LOW",
+            rx.badge("LOW", color_scheme="green", variant="solid", size="1"),
         ),
-        rx.badge(
-            confidence,
-            color_scheme="gray",
-            variant="soft",
-            font_size="0.65rem",
-        ),
+        rx.badge(severity, color_scheme="gray", variant="soft", size="1"),
     )
 
 
-def _mitigation_badge(routing: rx.Var) -> rx.Component:
-    """Soft badge for the mitigation routing label."""
-    return rx.match(
-        routing,
-        (
-            "Risk Register",
-            rx.badge("Risk Register", color_scheme="red", variant="soft"),
-        ),
-        (
-            "Scope Modification",
-            rx.badge("Scope Modification", color_scheme="blue", variant="soft"),
-        ),
-        (
-            "Assumptions Matrix",
-            rx.badge("Assumptions Matrix", color_scheme="purple", variant="soft"),
-        ),
-        (
-            "Both R&A",
-            rx.badge("Both R&A", color_scheme="orange", variant="soft"),
-        ),
-        rx.badge("Ignored", color_scheme="gray", variant="soft"),
+def _type_badge(finding_type: rx.Var) -> rx.Component:
+    return rx.badge(
+        finding_type,
+        color_scheme="indigo",
+        variant="soft",
+        size="1",
     )
 
 
-def _citation_row(citation: dict) -> rx.Component:
-    """Single citation reference rendered as a compact row."""
-    return rx.hstack(
-        rx.icon("file-text", size=11, color="#475569", flex_shrink="0"),
-        rx.text(
-            citation["file_path"],
-            font_size="0.7rem",
-            color="#64748b",
-            font_family="monospace",
-        ),
-        rx.text(
-            rx.fragment(
-                "L",
-                citation["line_start"].to_string(),
-                "–",
-                citation["line_end"].to_string(),
-            ),
-            font_size="0.7rem",
-            color="#475569",
-        ),
-        spacing="1",
-        align="center",
-        flex_wrap="wrap",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Public component
-# ---------------------------------------------------------------------------
+# ── Public component ──────────────────────────────────────────────────────────
 
 def finding_card(finding: dict) -> rx.Component:
-    """Render a single finding dict as a styled card.
+    """
+    Render a single FindingItem dict as a styled card.
 
-    Args:
-        finding: dict with keys: dimension, confidence, summary, detail,
-                 citations, mitigation_routing.
+    Fields used: type, severity, text, source_artifact, citation.
     """
     return rx.box(
-        # ── Card body ────────────────────────────────────────────────────
         rx.vstack(
-            # Row 1: dimension label + confidence badge
+            # Row 1: type badge + severity badge
             rx.hstack(
+                _type_badge(finding["type"]),
+                _severity_badge(finding["severity"]),
+                rx.spacer(),
                 rx.text(
-                    finding["dimension"],
-                    font_size="0.875rem",
-                    font_weight="600",
-                    color="#e2e8f0",
-                    text_transform="uppercase",
-                    letter_spacing="0.05em",
+                    finding["source_artifact"],
+                    size="1",
+                    color_scheme="gray",
+                    font_family="monospace",
+                    truncate=True,
+                    max_width="200px",
                 ),
-                _confidence_badge(finding["confidence"]),
-                justify="between",
                 align="center",
                 width="100%",
             ),
 
-            # Row 2: summary
+            # Row 2: finding text
             rx.text(
-                finding["summary"],
-                font_size="0.875rem",
-                font_weight="500",
-                color="#cbd5e1",
-                line_height="1.5",
-            ),
-
-            # Row 3: detail
-            rx.text(
-                finding["detail"],
-                font_size="0.8125rem",
-                color="#94a3b8",
+                finding["text"],
+                size="2",
+                color="var(--gray-12)",
                 line_height="1.6",
             ),
 
-            # Row 4: citations
+            # Row 3: citation excerpt (if present)
             rx.cond(
-                finding["citations"].length() > 0,
+                finding["citation"] != "",
                 rx.box(
                     rx.text(
-                        "Citations",
-                        font_size="0.7rem",
-                        font_weight="600",
-                        color="#475569",
-                        text_transform="uppercase",
-                        letter_spacing="0.06em",
-                        margin_bottom="0.25rem",
+                        finding["citation"],
+                        size="1",
+                        color_scheme="gray",
+                        font_family="monospace",
+                        line_height="1.5",
                     ),
-                    rx.foreach(finding["citations"], _citation_row),
-                    padding="0.5rem",
-                    background="#0f1117",
-                    border_radius="4px",
-                    border="1px solid #1e293b",
+                    padding="0.5rem 0.75rem",
+                    background="var(--gray-3)",
+                    border_left="3px solid var(--gray-8)",
+                    border_radius="0 4px 4px 0",
                     width="100%",
                 ),
                 rx.fragment(),
-            ),
-
-            # Row 5: mitigation routing
-            rx.hstack(
-                rx.text(
-                    "Routing:",
-                    font_size="0.75rem",
-                    color="#475569",
-                    font_weight="500",
-                ),
-                _mitigation_badge(finding["mitigation_routing"]),
-                spacing="2",
-                align="center",
             ),
 
             spacing="3",
             align="start",
             width="100%",
         ),
-        # ── Card container ───────────────────────────────────────────────
+        # Card container with severity-coloured left border
         padding="1rem",
-        background="#141720",
-        border="1px solid #1e293b",
-        border_left=rx.fragment(
-            "4px solid ",
-            _confidence_border(finding["confidence"]),
-        ),
+        background="var(--gray-2)",
+        border="1px solid var(--gray-4)",
+        border_left=rx.fragment("4px solid ", _severity_border(finding["severity"])),
         border_radius="6px",
         width="100%",
         transition="border-color 0.15s ease",
-        _hover={"border_color": "#334155"},
+        _hover={"border_color": "var(--gray-6)"},
     )

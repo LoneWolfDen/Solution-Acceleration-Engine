@@ -42,6 +42,40 @@ async def list_projects(
     return schemas.ProjectListResponse(projects=items)
 
 
+@router.get("/{project_id}", tags=["projects"])
+async def get_project_detail(
+    project_id: str,
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> dict:
+    """Return a project with its versions and node summaries (for sidebar expansion)."""
+    from contexta.api.schemas import VersionResponse, NodeSummaryResponse, ProjectDetailResponse
+    project = await db_repo.get_project(conn, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
+
+    versions = await db_repo.list_versions_for_project(conn, project_id)
+    nodes = await db_repo.list_nodes_for_project(conn, project_id)
+
+    return {
+        "id": project.id,
+        "name": project.name,
+        "global_tags": project.global_tags,
+        "versions": [
+            {"id": v.id, "project_id": v.project_id, "name": v.name,
+             "description": v.description, "created_at": v.created_at}
+            for v in versions
+        ],
+        "nodes": [
+            {"id": n.id, "project_id": n.project_id, "parent_id": n.parent_id,
+             "layer_type": n.layer_type, "node_name": n.node_name,
+             "created_at": n.created_at, "version_tag": n.version_tag,
+             "version_id": n.version_id}
+            for n in nodes
+        ],
+        "error": None,
+    }
+
+
 @router.delete("/{project_id}", response_model=schemas.DeleteResponse)
 async def delete_project(
     project_id: str,
