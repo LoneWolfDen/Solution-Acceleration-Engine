@@ -10,4 +10,5 @@ config = rx.Config(
     app_name="web",
     # Disable Reflex's own SQLite state persistence — we manage our own DB.
     db_url=None,
+    plugins=[rx.plugins.RadixThemesPlugin(theme=...)],
 )
