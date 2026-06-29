@@ -19,25 +19,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # ── Python dependencies ───────────────────────────────────────────────────────
-# All versions are pinned or lower-bounded for reproducibility.
-# reflex==0.6.7 and sqlmodel are pinned because Reflex is strict about its
-# sqlmodel version when pydantic v2 is present.
+# Two-stage COPY: copy pyproject.toml first so Docker can cache the dependency
+# layer independently of source changes.  A minimal package stub satisfies
+# hatchling's editable-install requirement; the real source is overlaid next.
 COPY pyproject.toml ./
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir \
-        "textual>=0.47.0" \
-        "pydantic>=2.5.0" \
-        "pydantic-settings>=2.1.0" \
-        "aiosqlite>=0.19.0" \
-        "litellm>=1.20.0" \
-        "mcp>=1.0.0" \
-        "fastapi>=0.109.0" \
-        "uvicorn[standard]>=0.27.0" \
-        "httpx>=0.26.0" \
-        "reflex==0.6.7" \
-        "sqlmodel>=0.0.14"
+    && mkdir -p contexta web \
+    && printf '"""stub"""' > contexta/__init__.py \
+    && pip install --no-cache-dir -e ".[dev]"
 
 # ── Application source ────────────────────────────────────────────────────────
+# Overwrite the stubs.  Because the install is editable (-e), Python resolves
+# the package from /app/contexta/ immediately — no reinstall needed.
 COPY contexta/ ./contexta/
 COPY web/      ./web/
 COPY rxconfig.py ./
