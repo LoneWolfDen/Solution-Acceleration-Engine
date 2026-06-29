@@ -15,11 +15,13 @@ def _artifact_row(artifact: dict) -> rx.Component:
     return rx.hstack(
         rx.icon("file-text", size=14, color="var(--gray-9)", flex_shrink="0"),
         rx.vstack(
-            rx.text(artifact["title"], size="2", weight="medium", truncate=True),
+            rx.text(artifact["title"], size="2",
+                    weight="medium", truncate=True),
             rx.hstack(
                 rx.foreach(
                     artifact["tags"],
-                    lambda tag: rx.badge(tag, color_scheme="blue", variant="soft", size="1"),
+                    lambda tag: rx.badge(
+                        tag, color_scheme="blue", variant="soft", size="1"),
                 ),
                 spacing="1",
                 flex_wrap="wrap",
@@ -95,10 +97,12 @@ def _node_row(node: dict) -> rx.Component:
                     node["node_name"],
                     size="2",
                     weight=rx.cond(is_selected, "bold", "regular"),
-                    color=rx.cond(is_selected, "var(--accent-11)", "var(--gray-12)"),
+                    color=rx.cond(is_selected, "var(--accent-11)",
+                                  "var(--gray-12)"),
                 ),
                 rx.hstack(
-                    rx.badge(node["layer_type"], color_scheme="indigo", variant="soft", size="1"),
+                    rx.badge(node["layer_type"], color_scheme="indigo",
+                             variant="soft", size="1"),
                     rx.text(
                         node["created_at"],
                         size="1",
@@ -111,7 +115,8 @@ def _node_row(node: dict) -> rx.Component:
                 spacing="1",
                 align="start",
             ),
-            rx.icon("chevron-right", size=14, color="var(--gray-8)", flex_shrink="0"),
+            rx.icon("chevron-right", size=14,
+                    color="var(--gray-8)", flex_shrink="0"),
             justify="between",
             align="center",
             width="100%",
@@ -124,7 +129,8 @@ def _node_row(node: dict) -> rx.Component:
         cursor="pointer",
         width="100%",
         on_click=AppState.select_node(node["id"]),
-        _hover={"background": "var(--accent-2)", "border_color": "var(--accent-6)"},
+        _hover={"background": "var(--accent-2)",
+                "border_color": "var(--accent-6)"},
     )
 
 
@@ -154,7 +160,8 @@ def version_detail() -> rx.Component:
                     rx.hstack(
                         rx.icon("layers", size=20, color="var(--accent-9)"),
                         rx.vstack(
-                            rx.heading(version["name"], size="5", weight="bold"),
+                            rx.heading(version["name"],
+                                       size="5", weight="bold"),
                             rx.text(
                                 version["created_at"],
                                 size="1",
@@ -178,11 +185,14 @@ def version_detail() -> rx.Component:
                     rx.cond(
                         version["artifacts"].to(list).length() > 0,
                         rx.vstack(
-                            rx.foreach(version["artifacts"], _artifact_row),
+                            # rx.foreach(version["artifacts"], _artifact_row),
+                            rx.foreach(
+                                AppState.current_version.artifacts, _artifact_row),
                             spacing="2",
                             width="100%",
                         ),
-                        rx.text("No artifacts linked to this version.", size="2", color_scheme="gray"),
+                        rx.text("No artifacts linked to this version.",
+                                size="2", color_scheme="gray"),
                     ),
                     spacing="2",
                     align="start",
@@ -195,11 +205,13 @@ def version_detail() -> rx.Component:
                     rx.cond(
                         AppState.selected_version_reviews.length() > 0,
                         rx.vstack(
-                            rx.foreach(AppState.selected_version_reviews, _review_row),
+                            rx.foreach(
+                                AppState.selected_version_reviews, _review_row),
                             spacing="2",
                             width="100%",
                         ),
-                        rx.text("No reviews run for this version yet.", size="2", color_scheme="gray"),
+                        rx.text("No reviews run for this version yet.",
+                                size="2", color_scheme="gray"),
                     ),
                     spacing="2",
                     align="start",
@@ -212,11 +224,13 @@ def version_detail() -> rx.Component:
                     rx.cond(
                         AppState.nodes_for_selected_version.length() > 0,
                         rx.vstack(
-                            rx.foreach(AppState.nodes_for_selected_version, _node_row),
+                            rx.foreach(
+                                AppState.nodes_for_selected_version, _node_row),
                             spacing="2",
                             width="100%",
                         ),
-                        rx.text("No review nodes for this version yet.", size="2", color_scheme="gray"),
+                        rx.text("No review nodes for this version yet.",
+                                size="2", color_scheme="gray"),
                     ),
                     spacing="2",
                     align="start",
