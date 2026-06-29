@@ -1,0 +1,52 @@
+# docker-compose.yml — single-container deployment for Solution Acceleration Engine.
+#
+# Ports:
+#   3000  →  Reflex Next.js frontend
+#   8000  →  FastAPI REST API  (AppState calls this via httpx)
+#   8001  →  Reflex WebSocket state-sync backend
+#
+# Usage:
+#   docker compose up --build          # first run
+#   docker compose up -d               # detached
+#   docker compose logs -f contexta    # tail logs
+#   docker compose down -v             # destroy including volumes
+
+services:
+  contexta:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      # GitHub Codespaces auto-forwards these ports to *.app.github.dev URLs.
+      # Map identically so CODESPACE_NAME-derived URLs resolve without translation.
+      - "3000:3000"   # Reflex frontend
+      - "8000:8000"   # FastAPI REST API
+      - "8001:8001"   # Reflex state-sync WebSocket
+    volumes:
+      - contexta_data:/data
+      - contexta_exports:/exports
+    environment:
+      CONTEXTA_DB_PATH: /data/contexta.db
+      CONTEXTA_EXPORT_PATH: /exports
+      CONTEXTA_LOG_LEVEL: WARNING
+      # Override at runtime with your LLM provider key:
+      #   docker compose run -e CONTEXTA_LLM_BACKEND=groq/llama3-8b-8192 contexta
+      CONTEXTA_API_URL: http://localhost:8000
+    env_file:
+      # Rename .env.example → .env and populate CONTEXTA_LLM_BACKEND.
+      # The compose file ignores missing .env files gracefully.
+      - path: .env
+        required: false
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+
+volumes:
+  contexta_data:
+    driver: local
+  contexta_exports:
+    driver: local
