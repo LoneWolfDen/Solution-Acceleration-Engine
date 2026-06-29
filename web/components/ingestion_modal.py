@@ -104,7 +104,7 @@ def _save_phase() -> rx.Component:
 def _triage_phase() -> rx.Component:
     return rx.vstack(
         rx.hstack(
-            rx.icon("check-circle", size=16, color="var(--green-9)"),
+            rx.icon("circle-check", size=16, color="var(--green-9)"),
             rx.text(
                 rx.fragment("Artifact '", AppState.last_saved_artifact["title"], "' saved."),
                 size="2",
