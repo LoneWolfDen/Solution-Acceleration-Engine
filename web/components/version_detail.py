@@ -185,8 +185,9 @@ def version_detail() -> rx.Component:
                     rx.cond(
                         AppState.current_version_artifacts.length() > 0,
                         rx.vstack(
+                            # rx.foreach(version["artifacts"], _artifact_row),
                             rx.foreach(
-                                AppState.current_version_artifacts, _artifact_row),
+                                AppState.current_version.artifacts, _artifact_row),
                             spacing="2",
                             width="100%",
                         ),
