@@ -28,20 +28,6 @@ _API_BASE: str = os.environ.get("CONTEXTA_API_URL", "http://localhost:8000")
 _HTTP_TIMEOUT: float = 15.0
 
 
-class ArtifactVar(rx.Base):
-    """Typed artifact model for Reflex rx.foreach type inference.
-
-    rx.Base is required (not plain Pydantic BaseModel) so Reflex registers
-    every field in its type registry. This lets Reflex resolve ``artifact["tags"]``
-    to ``Var[list[str]]`` inside nested rx.foreach calls instead of ``Var[Any]``.
-    """
-
-    artifact_id: str = ""
-    title: str = ""
-    tags: list[str] = []
-    is_active: bool = True
-
-
 def _normalize_project(p: dict) -> dict:
     """Ensure every project dict uses 'id' as the primary key."""
     if "project_id" in p and "id" not in p:
@@ -139,40 +125,13 @@ class AppState(rx.State):
         return {**self.selected_version, "reviews": self.selected_version_reviews}
 
     @rx.var(cache=True)
-    def current_version_artifacts(self) -> list[ArtifactVar]:
-        """Typed artifact list for the selected version.
+    def current_version_artifacts(self) -> list[dict]:
+        """Artifact list for the selected version as a typed list[dict].
 
-        Returns ``list[ArtifactVar]`` so Reflex can infer field types inside
-        ``rx.foreach``, including the nested ``artifact["tags"]`` list.
-        Returns an empty list when no version is selected.
+        Returns list[dict] so rx.foreach receives a typed iterable (not Var[Any]).
+        Use artifact["key"].to(list[str]) inside the render fn for nested lists.
         """
-        raw = self.selected_version.get("artifacts", [])
-        return [
-            ArtifactVar(
-                artifact_id=a.get("artifact_id", ""),
-                title=a.get("title", ""),
-                tags=a.get("tags", []),
-                is_active=a.get("is_active", True),
-            )
-            for a in raw
-        ]
-
-    @rx.var(cache=True)
-    def triage_artifacts_typed(self) -> list[ArtifactVar]:
-        """Typed triage artifact list for rx.foreach compatibility.
-
-        Wraps ``triage_artifacts: list[dict]`` so Reflex can resolve
-        ``artifact["tags"]`` to ``Var[list[str]]`` in the triage widget.
-        """
-        return [
-            ArtifactVar(
-                artifact_id=a.get("artifact_id", ""),
-                title=a.get("title", ""),
-                tags=a.get("tags", []),
-                is_active=a.get("is_active", True),
-            )
-            for a in self.triage_artifacts
-        ]
+        return self.selected_version.get("artifacts", [])
 
     @rx.var(cache=True)
     def versions_for_selected_project(self) -> list[dict]:
