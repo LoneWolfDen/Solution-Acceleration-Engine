@@ -13,7 +13,7 @@ def toast_notification() -> rx.Component:
         rx.box(
             rx.hstack(
                 rx.icon(
-                    rx.cond(AppState.toast_is_error, "alert-circle", "check-circle"),
+                    rx.cond(AppState.toast_is_error, "circle-alert", "circle-check"),
                     size=16,
                     color=rx.cond(AppState.toast_is_error, "var(--red-11)", "var(--green-11)"),
                     flex_shrink="0",

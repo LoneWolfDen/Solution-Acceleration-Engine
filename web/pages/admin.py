@@ -15,7 +15,7 @@ def _provider_pill(name: str, status: rx.Var) -> rx.Component:
     is_ok = (status == "configured") | (status == "set")
     return rx.hstack(
         rx.icon(
-            rx.cond(is_ok, "check-circle", "x-circle"),
+            rx.cond(is_ok, "circle-check", "circle-x"),
             size=14,
             color=rx.cond(is_ok, "var(--green-9)", "var(--gray-9)"),
         ),
@@ -33,7 +33,7 @@ def _provider_pill(name: str, status: rx.Var) -> rx.Component:
 def _section_card(title: str, *children) -> rx.Component:
     return rx.box(
         rx.vstack(
-            rx.heading(title, size="4", weight="semibold"),
+            rx.heading(title, size="4", weight="bold"),
             rx.separator(width="100%"),
             *children,
             spacing="4",
