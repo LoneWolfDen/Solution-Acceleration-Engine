@@ -14,7 +14,6 @@ API URL:
 """
 
 from __future__ import annotations
-from contexta.api.schemas import FindingItem
 import json
 import logging
 import os
@@ -105,16 +104,14 @@ class AppState(rx.State):
     @rx.var(cache=True)
     def current_node(self) -> dict:
         return self.selected_node
-    """
+
     @rx.var(cache=True)
-    def current_findings(self) -> list:
+    def current_findings(self) -> list[dict]:
+        """Return findings as plain dicts — Reflex Vars must use JSON-serialisable types.
+        Using list[FindingItem] (a Pydantic model from contexta.api) would raise
+        UntypedVarError because Reflex cannot generate JS code for external Pydantic types.
+        """
         return self.selected_node.get("findings", [])
-    """
-    @rx.var(cache=True)
-    def current_findings(self) -> list[FindingItem]:
-        # If the API returns a list of raw dicts, convert them:
-        raw_data = self.selected_node.get("findings", [])
-        return [FindingItem(**item) for item in raw_data]
     
     @rx.var(cache=True)
     def current_version(self) -> dict:
