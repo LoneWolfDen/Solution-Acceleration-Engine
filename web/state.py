@@ -315,7 +315,9 @@ class AppState(rx.State):
         self.artifact_title = title
 
     def set_artifact_source(self, source: str):
-        self.artifact_source = source
+        # Map display labels (from rx.radio_group list API) to internal values.
+        _display_to_internal = {"Paste Text": "paste", "URL Reference": "url"}
+        self.artifact_source = _display_to_internal.get(source, source)
 
     def set_artifact_content(self, content: str):
         self.artifact_content = content
