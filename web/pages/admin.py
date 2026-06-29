@@ -51,8 +51,8 @@ def _section_card(title: str, *children) -> rx.Component:
 # ── Section 1: System Health ──────────────────────────────────────────────────
 
 def _health_section() -> rx.Component:
-    providers = AppState.admin_health["providers"]
-    last_run = AppState.admin_health["last_run"]
+    providers = AppState.admin_health_providers
+    last_run = AppState.admin_health_last_run
     return _section_card(
         "System Health",
         rx.hstack(
@@ -75,7 +75,7 @@ def _health_section() -> rx.Component:
 # ── Section 2: LLM Configuration ─────────────────────────────────────────────
 
 def _api_key_field(provider: str) -> rx.Component:
-    providers_cfg = AppState.admin_config["providers"]
+    providers_cfg = AppState.admin_config_providers
     key_status = providers_cfg[provider]
     is_set = key_status == "set"
     placeholder = rx.cond(is_set, "••••••••  (currently set)", "Paste API key here…")
@@ -106,7 +106,7 @@ def _api_key_field(provider: str) -> rx.Component:
 
 
 def _llm_config_section() -> rx.Component:
-    ollama_url = AppState.admin_config["ollama_url"]
+    ollama_url = AppState.admin_config_ollama_url_value
     return _section_card(
         "LLM Configuration",
         _api_key_field("groq"),
@@ -142,11 +142,11 @@ def _llm_config_section() -> rx.Component:
 # ── Section 3: Gate Thresholds ────────────────────────────────────────────────
 
 def _threshold_row(label: str, key: str) -> rx.Component:
-    current_val = AppState.admin_config["thresholds"][key]
+    current_val = AppState.admin_config_thresholds[key]
     return rx.hstack(
         rx.text(label, size="2", weight="medium", width="140px"),
         rx.input(
-            default_value=str(current_val),
+            default_value=current_val.to(str),
             id=f"threshold_{key}",
             size="2",
             type="number",
