@@ -23,7 +23,7 @@ def _triage_row(artifact: dict) -> rx.Component:
         ),
         rx.hstack(
             rx.foreach(
-                artifact["tags"],
+                artifact["tags"].to(list[str]),
                 lambda t: rx.badge(t, size="1", color_scheme="gray", variant="soft"),
             ),
             spacing="1",
@@ -60,9 +60,9 @@ def triage_widget() -> rx.Component:
             padding_y="0.375rem",
         ),
         rx.cond(
-            AppState.triage_artifacts_typed.length() > 0,
+            AppState.triage_artifacts.length() > 0,
             rx.vstack(
-                rx.foreach(AppState.triage_artifacts_typed, _triage_row),
+                rx.foreach(AppState.triage_artifacts, _triage_row),
                 spacing="2",
                 width="100%",
             ),
