@@ -138,9 +138,9 @@ def ingestion_modal() -> rx.Component:
             ),
             rx.separator(width="100%", my="3"),
             rx.cond(
-                AppState.last_saved_artifact == {},
-                _save_phase(),
+                AppState.artifact_save_complete,
                 _triage_phase(),
+                _save_phase(),
             ),
             max_width="600px",
             padding="1.5rem",

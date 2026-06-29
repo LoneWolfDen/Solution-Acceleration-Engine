@@ -55,6 +55,7 @@ class AppState(rx.State):
     artifact_tag_suggestions: list[str] = []
     artifact_custom_tag: str = ""
     ingestion_is_saving: bool = False
+    artifact_save_complete: bool = False
     last_saved_artifact: dict = {}
     triage_artifacts: list[dict] = []
 
@@ -325,6 +326,7 @@ class AppState(rx.State):
 
     def open_ingestion_modal(self):
         self.artifact_ingestion_open = True
+        self.artifact_save_complete = False
         self.artifact_title = ""
         self.artifact_source = "paste"
         self.artifact_content = ""
@@ -417,6 +419,7 @@ class AppState(rx.State):
                 )
                 resp.raise_for_status()
                 self.last_saved_artifact = resp.json()
+                self.artifact_save_complete = True
                 self.set_toast(
                     f"Artifact '{self.artifact_title}' saved.", is_error=False)
                 await self._load_triage_artifacts()
