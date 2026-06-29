@@ -178,6 +178,32 @@ class AppState(rx.State):
     def can_create_version(self) -> bool:
         return len(self.triage_active_artifact_ids) > 0 and self.selected_project_id != ""
 
+    # ── Admin typed accessors ─────────────────────────────────────────────────
+    # admin_health and admin_config are plain dict vars, so deep subscript access
+    # via Reflex Vars returns Var[Any] — which cannot be further indexed.
+    # These computed vars expose each sub-dict with explicit return types so that
+    # bracket-indexing in admin.py produces correctly typed Vars.
+
+    @rx.var(cache=True)
+    def admin_health_providers(self) -> dict[str, str]:
+        return self.admin_health.get("providers", {})
+
+    @rx.var(cache=True)
+    def admin_health_last_run(self) -> str:
+        return self.admin_health.get("last_run") or ""
+
+    @rx.var(cache=True)
+    def admin_config_providers(self) -> dict[str, str]:
+        return self.admin_config.get("providers", {})
+
+    @rx.var(cache=True)
+    def admin_config_thresholds(self) -> dict[str, float]:
+        return self.admin_config.get("thresholds", {})
+
+    @rx.var(cache=True)
+    def admin_config_ollama_url_value(self) -> str:
+        return str(self.admin_config.get("ollama_url", ""))
+
     # ── Toast helpers ─────────────────────────────────────────────────────────
 
     def set_toast(self, message: str, is_error: bool = False) -> None:
