@@ -54,13 +54,15 @@ def _form_body() -> rx.Component:
         rx.vstack(
             rx.text("Source", size="2", weight="medium"),
             rx.radio_group(
-                rx.hstack(
-                    rx.radio("Paste Text", value="paste"),
-                    rx.radio("URL Reference", value="url"),
-                    spacing="4",
+                ["Paste Text", "URL Reference"],
+                value=rx.cond(
+                    AppState.artifact_source == "paste",
+                    "Paste Text",
+                    "URL Reference",
                 ),
-                value=AppState.artifact_source,
                 on_change=AppState.set_artifact_source,
+                direction="row",
+                gap="4",
             ),
             spacing="1",
             width="100%",
