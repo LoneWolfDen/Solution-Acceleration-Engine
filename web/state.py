@@ -14,7 +14,7 @@ API URL:
 """
 
 from __future__ import annotations
-from contexta.api.schemas import FindingItem
+from contexta.api.schemas import FindingItem, VersionDetailResponse
 import json
 import logging
 import os
@@ -37,7 +37,7 @@ def _normalize_project(p: dict) -> dict:
 
 class AppState(rx.State):
     """Central application state. Components only read; handlers write."""
-
+    current_version: VersionDetailResponse | None = None
     # ── API data ──────────────────────────────────────────────────────────────
     projects: list[dict] = []
     selected_project: dict = {}
@@ -115,7 +115,7 @@ class AppState(rx.State):
         # If the API returns a list of raw dicts, convert them:
         raw_data = self.selected_node.get("findings", [])
         return [FindingItem(**item) for item in raw_data]
-    
+
     @rx.var(cache=True)
     def current_version(self) -> dict:
         if not self.selected_version:
@@ -188,13 +188,16 @@ class AppState(rx.State):
                 resp = await client.get(f"{_API_BASE}/api/projects")
                 resp.raise_for_status()
                 data = resp.json()
-                raw = data.get("projects", data) if isinstance(data, dict) else data
+                raw = data.get("projects", data) if isinstance(
+                    data, dict) else data
                 self.projects = [_normalize_project(p) for p in raw]
-                _log.info("load_projects: loaded %d project(s)", len(self.projects))
+                _log.info("load_projects: loaded %d project(s)",
+                          len(self.projects))
             except httpx.HTTPStatusError as exc:
                 self.set_toast(self._extract_error(exc), is_error=True)
             except httpx.RequestError as exc:
-                self.set_toast(f"Cannot reach API at {_API_BASE}: {exc}", is_error=True)
+                self.set_toast(
+                    f"Cannot reach API at {_API_BASE}: {exc}", is_error=True)
         self.is_loading = False
 
     # ── Project selection ─────────────────────────────────────────────────────
@@ -334,7 +337,8 @@ class AppState(rx.State):
 
     def toggle_suggestion_tag(self, tag: str):
         if tag in self.artifact_tags_applied:
-            self.artifact_tags_applied = [t for t in self.artifact_tags_applied if t != tag]
+            self.artifact_tags_applied = [
+                t for t in self.artifact_tags_applied if t != tag]
         else:
             self.artifact_tags_applied = [*self.artifact_tags_applied, tag]
 
@@ -350,7 +354,8 @@ class AppState(rx.State):
             self.add_custom_tag()
 
     def remove_applied_tag(self, tag: str):
-        self.artifact_tags_applied = [t for t in self.artifact_tags_applied if t != tag]
+        self.artifact_tags_applied = [
+            t for t in self.artifact_tags_applied if t != tag]
 
     async def save_artifact(self):
         if not self.artifact_title or not self.selected_project_id:
@@ -373,7 +378,8 @@ class AppState(rx.State):
                 )
                 resp.raise_for_status()
                 self.last_saved_artifact = resp.json()
-                self.set_toast(f"Artifact '{self.artifact_title}' saved.", is_error=False)
+                self.set_toast(
+                    f"Artifact '{self.artifact_title}' saved.", is_error=False)
                 await self._load_triage_artifacts()
             except httpx.HTTPStatusError as exc:
                 self.set_toast(self._extract_error(exc), is_error=True)
@@ -408,7 +414,8 @@ class AppState(rx.State):
 
         # Optimistic update
         self.triage_artifacts = [
-            {**a, "is_active": new_active} if a.get("artifact_id") == artifact_id else a
+            {**a, "is_active": new_active} if a.get(
+                "artifact_id") == artifact_id else a
             for a in self.triage_artifacts
         ]
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
@@ -445,7 +452,8 @@ class AppState(rx.State):
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                self.set_toast(f"Version '{data.get('name', '')}' created.", is_error=False)
+                self.set_toast(
+                    f"Version '{data.get('name', '')}' created.", is_error=False)
                 self.artifact_ingestion_open = False
                 await self.select_project(self.selected_project_id)
             except httpx.HTTPStatusError as exc:
@@ -469,7 +477,8 @@ class AppState(rx.State):
                 self.admin_config = c_resp.json()
             except Exception as exc:
                 _log.error("load_admin_page error: %s", exc)
-                self.set_toast(f"Failed to load admin data: {exc}", is_error=True)
+                self.set_toast(
+                    f"Failed to load admin data: {exc}", is_error=True)
         await self._load_projects_for_admin()
         self.admin_loading = False
 
@@ -479,7 +488,8 @@ class AppState(rx.State):
                 resp = await client.get(f"{_API_BASE}/api/projects")
                 resp.raise_for_status()
                 data = resp.json()
-                raw = data.get("projects", data) if isinstance(data, dict) else data
+                raw = data.get("projects", data) if isinstance(
+                    data, dict) else data
                 self.projects = [_normalize_project(p) for p in raw]
             except Exception as exc:
                 _log.warning("Admin: failed to load projects: %s", exc)
@@ -491,16 +501,19 @@ class AppState(rx.State):
             return
         # Distinguish between LLM keys and Ollama URL
         if provider == "ollama":
-            payload: dict = {"field": "ollama_url", "ollama_url": str(key).strip()}
+            payload: dict = {"field": "ollama_url",
+                             "ollama_url": str(key).strip()}
         else:
-            payload = {"field": "api_key", "provider": provider, "key": str(key).strip()}
+            payload = {"field": "api_key",
+                       "provider": provider, "key": str(key).strip()}
 
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             try:
                 resp = await client.post(f"{_API_BASE}/api/admin/config", json=payload)
                 resp.raise_for_status()
                 self.admin_key_saved_provider = provider
-                self.set_toast(f"{provider.upper()} key saved.", is_error=False)
+                self.set_toast(
+                    f"{provider.upper()} key saved.", is_error=False)
                 c_resp = await client.get(f"{_API_BASE}/api/admin/config")
                 c_resp.raise_for_status()
                 self.admin_config = c_resp.json()
@@ -514,7 +527,8 @@ class AppState(rx.State):
             try:
                 resp = await client.post(
                     f"{_API_BASE}/api/admin/config",
-                    json={"field": "threshold", "threshold_name": name, "threshold_value": value},
+                    json={"field": "threshold", "threshold_name": name,
+                          "threshold_value": value},
                 )
                 resp.raise_for_status()
                 self.set_toast(f"Threshold '{name}' saved.", is_error=False)
