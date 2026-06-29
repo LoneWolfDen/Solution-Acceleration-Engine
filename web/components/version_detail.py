@@ -183,7 +183,7 @@ def version_detail() -> rx.Component:
                 rx.vstack(
                     _section_label("paperclip", "Linked Artifacts"),
                     rx.cond(
-                        version["artifacts"].to(list).length() > 0,
+                        AppState.current_version_artifacts.length() > 0,
                         rx.vstack(
                             # rx.foreach(version["artifacts"], _artifact_row),
                             rx.foreach(
