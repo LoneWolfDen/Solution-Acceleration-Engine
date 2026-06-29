@@ -37,7 +37,7 @@ def _normalize_project(p: dict) -> dict:
 
 class AppState(rx.State):
     """Central application state. Components only read; handlers write."""
-    current_version: VersionDetailResponse | None = None
+
     # ── API data ──────────────────────────────────────────────────────────────
     projects: list[dict] = []
     selected_project: dict = {}
@@ -118,8 +118,10 @@ class AppState(rx.State):
 
     @rx.var(cache=True)
     def current_version(self) -> dict:
+        """Returns the current version merged with its reviews."""
         if not self.selected_version:
             return {}
+        # Ensure selected_version is handled as a dict if necessary
         return {**self.selected_version, "reviews": self.selected_version_reviews}
 
     @rx.var(cache=True)
