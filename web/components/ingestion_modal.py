@@ -36,6 +36,54 @@ def _source_tab_url() -> rx.Component:
     )
 
 
+def _source_tab_upload() -> rx.Component:
+    return rx.vstack(
+        rx.upload.root(
+            rx.vstack(
+                rx.icon("upload", size=28, color="var(--gray-8)"),
+                rx.text(
+                    "Drag and drop a file here, or click to browse",
+                    size="2",
+                    color_scheme="gray",
+                    text_align="center",
+                ),
+                spacing="2",
+                align="center",
+            ),
+            id="artifact_upload",
+            multiple=False,
+            max_files=1,
+            on_drop=AppState.handle_artifact_upload(
+                rx.upload_files(upload_id="artifact_upload")
+            ),
+            border="1px dashed var(--gray-7)",
+            border_radius="8px",
+            padding="2rem",
+            width="100%",
+            cursor="pointer",
+        ),
+        rx.cond(
+            AppState.artifact_upload_filename != "",
+            rx.hstack(
+                rx.icon("file-check-2", size=14, color="var(--green-9)"),
+                rx.text(AppState.artifact_upload_filename, size="2", weight="medium"),
+                rx.icon_button(
+                    rx.icon("x", size=12),
+                    size="1",
+                    variant="ghost",
+                    color_scheme="gray",
+                    on_click=AppState.clear_artifact_upload,
+                ),
+                spacing="2",
+                align="center",
+            ),
+            rx.fragment(),
+        ),
+        spacing="2",
+        width="100%",
+    )
+
+
 def _form_body() -> rx.Component:
     return rx.vstack(
         rx.vstack(
@@ -54,11 +102,15 @@ def _form_body() -> rx.Component:
         rx.vstack(
             rx.text("Source", size="2", weight="medium"),
             rx.radio_group(
-                ["Paste Text", "URL Reference"],
+                ["Upload File", "Paste Text", "URL Reference"],
                 value=rx.cond(
-                    AppState.artifact_source == "paste",
-                    "Paste Text",
-                    "URL Reference",
+                    AppState.artifact_source == "upload",
+                    "Upload File",
+                    rx.cond(
+                        AppState.artifact_source == "paste",
+                        "Paste Text",
+                        "URL Reference",
+                    ),
                 ),
                 on_change=AppState.set_artifact_source,
                 direction="row",
@@ -67,7 +119,15 @@ def _form_body() -> rx.Component:
             spacing="1",
             width="100%",
         ),
-        rx.cond(AppState.artifact_source == "paste", _source_tab_paste(), _source_tab_url()),
+        rx.cond(
+            AppState.artifact_source == "upload",
+            _source_tab_upload(),
+            rx.cond(
+                AppState.artifact_source == "paste",
+                _source_tab_paste(),
+                _source_tab_url(),
+            ),
+        ),
         rx.vstack(
             rx.text("Tags", size="2", weight="medium"),
             tag_suggestion_chips(),
