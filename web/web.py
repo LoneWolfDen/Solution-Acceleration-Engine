@@ -14,6 +14,7 @@ from web.components.content_pane import content_pane
 from web.components.toast import toast_notification
 from web.components.ingestion_modal import ingestion_modal
 from web.pages import admin as _admin_module  # noqa: F401 — registers /admin via @rx.page
+from web.pages import run_review as _run_review_module  # noqa: F401 — registers /run-review/[version_id]
 
 
 def index() -> rx.Component:

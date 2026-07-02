@@ -16,26 +16,21 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from contexta.api import repositories as api_repo
 from contexta.api import schemas
+from contexta.api.config_keys import (
+    KEY_GEMINI as _KEY_GEMINI,
+    KEY_GROQ as _KEY_GROQ,
+    KEY_MAX_ACTIVE_PROJECTS as _KEY_MAX_ACTIVE_PROJECTS,
+    KEY_OLLAMA_URL as _KEY_OLLAMA_URL,
+    KEY_OPENROUTER as _KEY_OPENROUTER,
+    KEY_THRESHOLD_CONSTRAINT as _KEY_THRESHOLD_CONSTRAINT,
+    KEY_THRESHOLD_DEPENDENCY as _KEY_THRESHOLD_DEPENDENCY,
+    KEY_THRESHOLD_RISK as _KEY_THRESHOLD_RISK,
+    PROVIDER_KEYS as _PROVIDER_KEYS,
+)
 from contexta.api.dependencies import get_db
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-# Config key constants — single source of truth
-_KEY_GROQ = "api_key_groq"
-_KEY_OPENROUTER = "api_key_openrouter"
-_KEY_GEMINI = "api_key_gemini"
-_KEY_OLLAMA_URL = "ollama_url"
-_KEY_THRESHOLD_RISK = "threshold_risk"
-_KEY_THRESHOLD_CONSTRAINT = "threshold_constraint"
-_KEY_THRESHOLD_DEPENDENCY = "threshold_dependency"
-_KEY_MAX_ACTIVE_PROJECTS = "max_active_projects"
-
-_PROVIDER_KEYS = {
-    "groq": _KEY_GROQ,
-    "openrouter": _KEY_OPENROUTER,
-    "gemini": _KEY_GEMINI,
-}
 
 
 def _status(value: Optional[str]) -> str:

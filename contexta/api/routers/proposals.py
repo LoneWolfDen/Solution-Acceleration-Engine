@@ -1,8 +1,10 @@
 """
 contexta/api/routers/proposals.py
 
-POST /api/proposals                        — trigger synthesis (stub with logging)
-GET  /api/proposals/{proposal_id}/status   — poll async status
+POST /api/proposals                        — trigger Layer 2 synthesis
+                                              (contexta.api.pipeline_bridge, Milestone 4)
+GET  /api/proposals/{proposal_id}/status   — poll async status; returns the
+                                              ReconciliationReport once complete
 """
 
 from __future__ import annotations
@@ -15,30 +17,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from contexta.api import repositories as api_repo
 from contexta.api import schemas
 from contexta.api.dependencies import get_db
+from contexta.db import repositories as db_repo
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["proposals"])
-
-
-async def _stub_synthesis_task(proposal_id: str, db_path: str) -> None:
-    """
-    Milestone 1 stub — logs synthesis trigger.  No LLM calls are made.
-    Sets status to 'complete' immediately.  Wired to the real synthesis
-    engine in Milestone 4.
-    """
-    from contexta.db.schema import init_database
-
-    logger.info("[INFO] Proposal synthesis triggered for Proposal ID %s", proposal_id)
-    logger.info("[STUB] Synthesis not yet wired — marking proposal %s as complete.", proposal_id)
-
-    conn = await init_database(db_path)
-    try:
-        await api_repo.update_proposal_job_status(
-            conn, proposal_id, "complete",
-            progress_message="Stub complete — synthesis wiring pending (Milestone 4).",
-        )
-    finally:
-        await conn.close()
 
 
 @router.post("/proposals", response_model=schemas.CreateProposalResponse, status_code=202)
@@ -63,8 +45,9 @@ async def create_proposal(
     job = await api_repo.create_proposal_job(conn, body.review_id)
 
     from contexta.api.config import load_api_config
+    from contexta.api.pipeline_bridge import run_proposal_pipeline_task
     db_path = load_api_config().db_path
-    background_tasks.add_task(_stub_synthesis_task, job.id, db_path)
+    background_tasks.add_task(run_proposal_pipeline_task, job.id, db_path)
 
     logger.info(
         "[INFO] Proposal synthesis triggered for Proposal ID %s (review=%s)",
@@ -84,8 +67,25 @@ async def get_proposal_status(
     job = await api_repo.get_proposal_job(conn, proposal_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Proposal '{proposal_id}' not found.")
+
+    report: dict | None = None
+    if job.status == "complete" and job.node_id:
+        node = await db_repo.get_node(conn, job.node_id)
+        if node is not None:
+            try:
+                from contexta.llm.models import ReconciliationReport
+
+                report = ReconciliationReport.model_validate_json(
+                    node.content_markdown
+                ).model_dump()
+            except Exception:
+                logger.warning(
+                    "Could not parse ReconciliationReport for node %s", node.id
+                )
+
     return schemas.ProposalStatusResponse(
         proposal_id=job.id,
         status=job.status,
         progress_message=job.progress_message,
+        report=report,
     )
