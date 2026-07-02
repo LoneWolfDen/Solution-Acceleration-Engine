@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import AsyncGenerator
 
 import aiosqlite
@@ -22,12 +21,14 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ..db.schema import init_database
+from .config import load_api_config
 from .routers import admin, artifacts, projects, proposals, reviews, versions
 
 # ── DB path resolution ────────────────────────────────────────────────────────
-_PROJECT_ROOT: Path = Path(__file__).parents[2]
-_DEFAULT_DB_PATH: str = str(_PROJECT_ROOT / "data" / "contexta.db")
-_DB_PATH: str = os.environ.get("CONTEXTA_DB_PATH", _DEFAULT_DB_PATH)
+# Sourced from WebAPIConfig so the main app and background pipeline tasks
+# (contexta/api/pipeline_bridge.py, invoked via load_api_config().db_path)
+# always resolve to the same database file.
+_DB_PATH: str = load_api_config().db_path
 
 # ── CORS origin resolution ────────────────────────────────────────────────────
 _CODESPACE_NAME: str = os.environ.get("CODESPACE_NAME", "")
