@@ -37,6 +37,17 @@ class ProjectListResponse(BaseModel):
     error: Optional[str] = None
 
 
+class CreateProjectRequest(BaseModel):
+    name: str
+    global_tags: List[str] = []
+
+
+class CreateProjectResponse(BaseModel):
+    project_id: str
+    name: str
+    error: Optional[str] = None
+
+
 # ── Versions ───────────────────────────────────────────────────────────────────
 
 class VersionItem(BaseModel):

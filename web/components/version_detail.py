@@ -11,6 +11,58 @@ import reflex as rx
 from web.state import AppState
 
 
+def _trigger_review_dialog() -> rx.Component:
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("Trigger Review"),
+            rx.dialog.description(
+                "Select a reviewer persona for this analysis run.",
+                size="2",
+                color_scheme="gray",
+                margin_bottom="1rem",
+            ),
+            rx.vstack(
+                rx.select.root(
+                    rx.select.trigger(placeholder="Select persona…"),
+                    rx.select.content(
+                        rx.select.item("Solution Architect", value="Solution Architect"),
+                        rx.select.item("Commercial Manager", value="Commercial Manager"),
+                        rx.select.item("Risk Manager", value="Risk Manager"),
+                        rx.select.item("Delivery Lead", value="Delivery Lead"),
+                        rx.select.item("Technical Lead", value="Technical Lead"),
+                    ),
+                    value=AppState.review_persona,
+                    on_change=AppState.set_review_persona,
+                    width="100%",
+                ),
+                rx.hstack(
+                    rx.button(
+                        "Cancel",
+                        variant="soft",
+                        color_scheme="gray",
+                        on_click=AppState.close_review_trigger,
+                    ),
+                    rx.button(
+                        rx.icon("play", size=13),
+                        "Run Review",
+                        color_scheme="indigo",
+                        on_click=AppState.trigger_review,
+                    ),
+                    spacing="3",
+                    justify="end",
+                    width="100%",
+                ),
+                spacing="4",
+                width="100%",
+            ),
+            max_width="420px",
+            padding="1.5rem",
+        ),
+        open=AppState.review_trigger_open,
+        on_open_change=AppState.close_review_trigger,
+    )
+
+
 def _artifact_row(artifact: dict) -> rx.Component:
     return rx.hstack(
         rx.icon("file-text", size=14, color="var(--gray-9)", flex_shrink="0"),
@@ -48,10 +100,12 @@ def _artifact_row(artifact: dict) -> rx.Component:
 
 
 def _review_row(review: dict) -> rx.Component:
+    is_selected = AppState.selected_node_id == review["review_id"]
     return rx.hstack(
-        rx.icon("git-branch", size=14, color="var(--gray-9)", flex_shrink="0"),
+        rx.icon("git-branch", size=14, color=rx.cond(is_selected, "var(--accent-9)", "var(--gray-9)"), flex_shrink="0"),
         rx.vstack(
-            rx.text(review["persona"], size="2", weight="medium"),
+            rx.text(review["persona"], size="2", weight="medium",
+                    color=rx.cond(is_selected, "var(--accent-11)", "inherit")),
             rx.text(
                 review["run_date"],
                 size="1",
@@ -76,9 +130,13 @@ def _review_row(review: dict) -> rx.Component:
         align="center",
         width="100%",
         padding="0.625rem 0.75rem",
-        background="var(--gray-2)",
-        border="1px solid var(--gray-4)",
+        background=rx.cond(is_selected, "var(--accent-3)", "var(--gray-2)"),
+        border="1px solid",
+        border_color=rx.cond(is_selected, "var(--accent-6)", "var(--gray-4)"),
         border_radius="6px",
+        cursor="pointer",
+        on_click=AppState.select_node(review["review_id"]),
+        _hover={"background": "var(--accent-2)", "border_color": "var(--accent-6)"},
     )
 
 
@@ -153,6 +211,7 @@ def _section_label(icon_name: str, label: str) -> rx.Component:
 def version_detail() -> rx.Component:
     version = AppState.current_version
     return rx.box(
+        _trigger_review_dialog(),
         rx.scroll_area(
             rx.vstack(
                 # Header
@@ -170,9 +229,20 @@ def version_detail() -> rx.Component:
                             ),
                             spacing="1",
                             align="start",
+                            flex="1",
+                        ),
+                        rx.button(
+                            rx.icon("play", size=13),
+                            "Trigger Review",
+                            size="1",
+                            variant="soft",
+                            color_scheme="indigo",
+                            on_click=AppState.open_review_trigger,
+                            flex_shrink="0",
                         ),
                         spacing="3",
-                        align="start",
+                        align="center",
+                        width="100%",
                     ),
                     padding_bottom="1rem",
                     border_bottom="1px solid var(--gray-4)",
