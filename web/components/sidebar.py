@@ -101,8 +101,55 @@ def _render_project(project: dict) -> rx.Component:
     )
 
 
+def _new_project_dialog() -> rx.Component:
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("New Project"),
+            rx.dialog.description(
+                "Enter a name for the new project.",
+                size="2",
+                color_scheme="gray",
+                margin_bottom="1rem",
+            ),
+            rx.vstack(
+                rx.input(
+                    placeholder="Project name…",
+                    value=AppState.new_project_name,
+                    on_change=AppState.set_new_project_name,
+                    size="3",
+                    width="100%",
+                    auto_focus=True,
+                ),
+                rx.hstack(
+                    rx.button(
+                        "Cancel",
+                        variant="soft",
+                        color_scheme="gray",
+                        on_click=AppState.close_new_project_dialog,
+                    ),
+                    rx.button(
+                        "Create",
+                        color_scheme="indigo",
+                        on_click=AppState.create_project,
+                    ),
+                    spacing="3",
+                    justify="end",
+                    width="100%",
+                ),
+                spacing="4",
+                width="100%",
+            ),
+            max_width="420px",
+            padding="1.5rem",
+        ),
+        open=AppState.new_project_dialog_open,
+        on_open_change=AppState.close_new_project_dialog,
+    )
+
+
 def sidebar() -> rx.Component:
     return rx.box(
+        _new_project_dialog(),
         rx.vstack(
             # Header
             rx.hstack(
@@ -116,11 +163,20 @@ def sidebar() -> rx.Component:
             ),
             rx.separator(width="100%"),
 
-            # Actions
+            # Actions row
             rx.hstack(
                 rx.button(
+                    rx.icon("folder-plus", size=13),
+                    "New Project",
+                    size="1",
+                    variant="soft",
+                    color_scheme="grass",
+                    on_click=AppState.open_new_project_dialog,
+                    flex="1",
+                ),
+                rx.button(
                     rx.icon("plus", size=13),
-                    "Ingest Artifact",
+                    "Ingest",
                     size="1",
                     variant="soft",
                     color_scheme="indigo",
@@ -146,6 +202,7 @@ def sidebar() -> rx.Component:
 
             rx.separator(width="100%"),
 
+            # Projects section header
             rx.hstack(
                 rx.text(
                     "PROJECTS",
@@ -155,7 +212,18 @@ def sidebar() -> rx.Component:
                     letter_spacing="0.08em",
                 ),
                 rx.spacer(),
-                rx.cond(AppState.is_loading, rx.spinner(size="1"), rx.fragment()),
+                rx.cond(
+                    AppState.is_loading,
+                    rx.spinner(size="1"),
+                    rx.icon_button(
+                        rx.icon("refresh-cw", size=12),
+                        size="1",
+                        variant="ghost",
+                        color_scheme="gray",
+                        on_click=AppState.refresh_projects,
+                        title="Refresh projects",
+                    ),
+                ),
                 padding_x="1rem",
                 padding_top="0.625rem",
                 padding_bottom="0.375rem",
@@ -168,7 +236,20 @@ def sidebar() -> rx.Component:
                     rx.cond(
                         AppState.projects.length() == 0,
                         rx.center(
-                            rx.text("No projects found.", size="1", color_scheme="gray"),
+                            rx.vstack(
+                                rx.text(
+                                    "No projects found.",
+                                    size="1",
+                                    color_scheme="gray",
+                                ),
+                                rx.text(
+                                    "Click 'New Project' to get started.",
+                                    size="1",
+                                    color_scheme="gray",
+                                ),
+                                align="center",
+                                spacing="1",
+                            ),
                             padding_y="2rem",
                             width="100%",
                         ),

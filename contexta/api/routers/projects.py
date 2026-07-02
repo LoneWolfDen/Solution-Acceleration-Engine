@@ -1,8 +1,10 @@
 """
 contexta/api/routers/projects.py
 
-GET  /api/projects            — list all projects with version/review counts
-DELETE /api/projects/{id}     — cascade-delete a project
+GET    /api/projects            — list all projects with version/review counts
+POST   /api/projects            — create a new project
+GET    /api/projects/{id}       — project detail with versions and nodes
+DELETE /api/projects/{id}       — cascade-delete a project
 """
 
 from __future__ import annotations
@@ -40,6 +42,17 @@ async def list_projects(
             )
         )
     return schemas.ProjectListResponse(projects=items)
+
+
+@router.post("", response_model=schemas.CreateProjectResponse, status_code=201)
+async def create_project(
+    body: schemas.CreateProjectRequest,
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> schemas.CreateProjectResponse:
+    """Create a new project."""
+    project = await db_repo.create_project(conn, body.name, body.global_tags)
+    logger.info("Project created: %s (name=%s)", project.id, project.name)
+    return schemas.CreateProjectResponse(project_id=project.id, name=project.name)
 
 
 @router.get("/{project_id}", tags=["projects"])
