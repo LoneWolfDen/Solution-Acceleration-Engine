@@ -58,6 +58,10 @@ class AppState(rx.State):
     last_saved_artifact: dict = {}
     triage_artifacts: list[dict] = []
 
+    # M3 — Upload File tab
+    artifact_upload_filename: str = ""
+    _artifact_upload_bytes: bytes = b""
+
     # M3 — Admin state (initialised with safe defaults so bracket access is safe)
     admin_config: dict = {
         "providers": {
@@ -99,9 +103,25 @@ class AppState(rx.State):
     # ── Version name input (triage widget) ────────────────────────────────────
     version_name: str = "Version 1"
 
-    # ── Trigger Review dialog ─────────────────────────────────────────────────
-    review_trigger_open: bool = False
-    review_persona: str = "Solution Architect"
+    # ── Milestone 4: Run Review page ──────────────────────────────────────────
+    run_review_version_id: str = ""
+    run_review_selected_personas: list[str] = []
+    run_review_backend: str = ""
+    run_review_context: str = ""
+    run_review_is_submitting: bool = False
+
+    # ── Milestone 4: Review status polling ────────────────────────────────────
+    active_review_id: str = ""
+    active_review_status: str = ""
+    active_review_progress_message: str = ""
+    review_poll_active: bool = False
+
+    # ── Milestone 4: Proposals ─────────────────────────────────────────────────
+    proposals_by_review: dict[str, dict] = {}
+    active_proposal_id: str = ""
+    active_proposal_status: str = ""
+    active_proposal_progress_message: str = ""
+    proposal_poll_active: bool = False
 
     # ── Computed vars ─────────────────────────────────────────────────────────
 
@@ -182,6 +202,43 @@ class AppState(rx.State):
     def can_create_version(self) -> bool:
         return len(self.triage_active_artifact_ids) > 0 and self.selected_project_id != ""
 
+    # ── Milestone 4: Run Review computed vars ─────────────────────────────────
+
+    @rx.var(cache=True)
+    def run_review_available_backends(self) -> list[str]:
+        """Providers with a configured key/URL, sourced from admin config."""
+        providers = self.admin_config.get("providers", {})
+        return [name for name, status in providers.items() if status == "set"]
+
+    @rx.var(cache=True)
+    def run_review_can_submit(self) -> bool:
+        return (
+            len(self.run_review_selected_personas) > 0
+            and self.run_review_version_id != ""
+            and not self.run_review_is_submitting
+        )
+
+    @rx.var(cache=True)
+    def active_review_is_terminal(self) -> bool:
+        return self.active_review_status in ("complete", "failed")
+
+    @rx.var(cache=True)
+    def current_proposal(self) -> dict:
+        """The proposal associated with the currently selected review node, if any."""
+        return self.proposals_by_review.get(self.selected_node_id, {})
+
+    @rx.var(cache=True)
+    def current_proposal_status(self) -> str:
+        return self.current_proposal.get("status", "")
+
+    @rx.var(cache=True)
+    def current_proposal_exists(self) -> bool:
+        return bool(self.current_proposal)
+
+    @rx.var(cache=True)
+    def current_proposal_report(self) -> dict:
+        return self.current_proposal.get("report") or {}
+
     # ── Admin typed accessors ─────────────────────────────────────────────────
     # admin_health and admin_config are plain dict vars, so deep subscript access
     # via Reflex Vars returns Var[Any] — which cannot be further indexed.
@@ -261,16 +318,29 @@ class AppState(rx.State):
         self.selected_node = {}
         self.is_loading = True
         yield
+        await self._reload_selected_project()
+        self.is_loading = False
+
+    async def _reload_selected_project(self) -> None:
+        """Re-fetch the currently selected project without toggling selection.
+
+        Used after mutations (e.g. version creation) that must refresh the
+        project's version/node tree while keeping it expanded in the sidebar.
+        Unlike select_project(), this never deselects — it is a pure refresh.
+        """
+        if not self.selected_project_id:
+            return
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             try:
-                resp = await client.get(f"{_API_BASE}/api/projects/{project_id}")
+                resp = await client.get(
+                    f"{_API_BASE}/api/projects/{self.selected_project_id}"
+                )
                 resp.raise_for_status()
                 self.selected_project = resp.json()
             except httpx.HTTPStatusError as exc:
                 self.set_toast(self._extract_error(exc), is_error=True)
             except httpx.RequestError as exc:
                 self.set_toast(f"Network error: {exc}", is_error=True)
-        self.is_loading = False
 
     # ── Version selection ─────────────────────────────────────────────────────
 
@@ -338,6 +408,8 @@ class AppState(rx.State):
         self.artifact_tag_suggestions = []
         self.artifact_custom_tag = ""
         self.last_saved_artifact = {}
+        self.artifact_upload_filename = ""
+        self._artifact_upload_bytes = b""
 
     def close_ingestion_modal(self):
         self.artifact_ingestion_open = False
@@ -347,7 +419,11 @@ class AppState(rx.State):
 
     def set_artifact_source(self, source: str):
         # Map display labels (from rx.radio_group list API) to internal values.
-        _display_to_internal = {"Paste Text": "paste", "URL Reference": "url"}
+        _display_to_internal = {
+            "Paste Text": "paste",
+            "URL Reference": "url",
+            "Upload File": "upload",
+        }
         self.artifact_source = _display_to_internal.get(source, source)
 
     def set_artifact_content(self, content: str):
@@ -356,19 +432,47 @@ class AppState(rx.State):
     def set_artifact_url(self, url: str):
         self.artifact_url = url
 
+    async def handle_artifact_upload(self, files: list[rx.UploadFile]):
+        """Read the dropped/selected file into memory for later multipart POST.
+
+        Stores raw bytes in a backend-only var (_artifact_upload_bytes) and
+        decodes a UTF-8 preview for tag suggestions.  Auto-fills the title
+        field from the filename when the title is still empty.
+        """
+        if not files:
+            return
+        file = files[0]
+        data = await file.read()
+        self._artifact_upload_bytes = data
+        self.artifact_upload_filename = file.name or "upload.bin"
+        if not self.artifact_title:
+            self.artifact_title = self.artifact_upload_filename
+        preview = data.decode("utf-8", errors="replace")[:500]
+        await self.fetch_tag_suggestions_for(self.artifact_upload_filename, preview)
+
+    def clear_artifact_upload(self):
+        self.artifact_upload_filename = ""
+        self._artifact_upload_bytes = b""
+
     def set_artifact_custom_tag(self, tag: str):
         self.artifact_custom_tag = tag
 
     async def fetch_tag_suggestions(self):
         if not self.artifact_title and not self.artifact_content:
             return
+        await self.fetch_tag_suggestions_for(
+            self.artifact_title, self.artifact_content[:500]
+        )
+
+    async def fetch_tag_suggestions_for(self, filename: str, content_preview: str):
+        """Shared suggestion fetch used by both paste/url blur and file upload."""
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             try:
                 resp = await client.get(
                     f"{_API_BASE}/api/artifacts/suggestions",
                     params={
-                        "filename": self.artifact_title,
-                        "content_preview": self.artifact_content[:500],
+                        "filename": filename,
+                        "content_preview": content_preview,
                     },
                 )
                 resp.raise_for_status()
@@ -405,26 +509,41 @@ class AppState(rx.State):
         if not self.artifact_title or not self.selected_project_id:
             self.set_toast("Title and project are required.", is_error=True)
             return
+        if self.artifact_source == "upload" and not self._artifact_upload_bytes:
+            self.set_toast("Select a file to upload.", is_error=True)
+            return
         self.ingestion_is_saving = True
         yield
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             try:
+                form_data = {
+                    "project_id": self.selected_project_id,
+                    "title": self.artifact_title,
+                    "source": self.artifact_source,
+                    "content": self.artifact_content,
+                    "url": self.artifact_url,
+                    "tags": json.dumps(self.artifact_tags_applied),
+                }
+                files = None
+                if self.artifact_source == "upload":
+                    files = {
+                        "file": (
+                            self.artifact_upload_filename or "upload.bin",
+                            self._artifact_upload_bytes,
+                            "application/octet-stream",
+                        )
+                    }
                 resp = await client.post(
                     f"{_API_BASE}/api/artifacts",
-                    data={
-                        "project_id": self.selected_project_id,
-                        "title": self.artifact_title,
-                        "source": self.artifact_source,
-                        "content": self.artifact_content,
-                        "url": self.artifact_url,
-                        "tags": json.dumps(self.artifact_tags_applied),
-                    },
+                    data=form_data,
+                    files=files,
                 )
                 resp.raise_for_status()
                 self.last_saved_artifact = resp.json()
                 self.artifact_save_complete = True
                 self.set_toast(
                     f"Artifact '{self.artifact_title}' saved.", is_error=False)
+                self.clear_artifact_upload()
                 await self._load_triage_artifacts()
             except httpx.HTTPStatusError as exc:
                 self.set_toast(self._extract_error(exc), is_error=True)
@@ -500,7 +619,7 @@ class AppState(rx.State):
                 self.set_toast(
                     f"Version '{data.get('name', '')}' created.", is_error=False)
                 self.artifact_ingestion_open = False
-                await self.select_project(self.selected_project_id)
+                await self._reload_selected_project()
             except httpx.HTTPStatusError as exc:
                 self.set_toast(self._extract_error(exc), is_error=True)
             except httpx.RequestError as exc:
@@ -641,48 +760,271 @@ class AppState(rx.State):
     def set_version_name(self, name: str) -> None:
         self.version_name = name
 
-    # ── Trigger Review ────────────────────────────────────────────────────────
+    # ── Milestone 4: Run Review page ───────────────────────────────────────────
 
-    def set_review_persona(self, persona: str) -> None:
-        self.review_persona = persona
+    def init_run_review_page(self) -> None:
+        """Reset the Run Review form for a fresh visit to /run-review/{version_id}.
 
-    def open_review_trigger(self) -> None:
-        self.review_persona = "Solution Architect"
-        self.review_trigger_open = True
+        ``self.version_id`` is auto-injected by Reflex from the dynamic route
+        segment ``[version_id]`` (see web/pages/run_review.py) — it is not a
+        declared AppState var, but Reflex populates it on every page load.
+        """
+        self.run_review_version_id = self.version_id
+        self.run_review_selected_personas = []
+        self.run_review_backend = ""
+        self.run_review_context = ""
+        self.run_review_is_submitting = False
 
-    def close_review_trigger(self) -> None:
-        self.review_trigger_open = False
+    def toggle_run_review_persona(self, persona: str) -> None:
+        if persona in self.run_review_selected_personas:
+            self.run_review_selected_personas = [
+                p for p in self.run_review_selected_personas if p != persona
+            ]
+        else:
+            self.run_review_selected_personas = [
+                *self.run_review_selected_personas, persona
+            ]
 
-    async def trigger_review(self) -> None:
-        if not self.selected_version_id:
+    def set_run_review_backend(self, backend: str) -> None:
+        self.run_review_backend = backend
+
+    def set_run_review_context(self, context: str) -> None:
+        self.run_review_context = context
+
+    async def submit_run_review(self):
+        """POST /api/reviews, then redirect to the version page for status polling."""
+        if not self.run_review_selected_personas:
+            self.set_toast("Select at least one persona role.", is_error=True)
+            return
+        if not self.run_review_version_id:
             self.set_toast("No version selected.", is_error=True)
             return
-        persona = self.review_persona.strip() or "Solution Architect"
+        self.run_review_is_submitting = True
+        yield
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             try:
                 resp = await client.post(
                     f"{_API_BASE}/api/reviews",
                     json={
-                        "version_id": self.selected_version_id,
-                        "persona_roles": [persona],
-                        "context": "",
+                        "version_id": self.run_review_version_id,
+                        "persona_roles": self.run_review_selected_personas,
+                        "context": self.run_review_context,
+                        "backend": self.run_review_backend or None,
                     },
                 )
                 resp.raise_for_status()
                 review_id = resp.json().get("review_id", "")
-                self.set_toast(
-                    f"Review triggered (ID: {review_id[:8]}…)", is_error=False
-                )
-                self.review_trigger_open = False
-                r_resp = await client.get(
-                    f"{_API_BASE}/api/versions/{self.selected_version_id}/reviews"
-                )
-                r_resp.raise_for_status()
-                self.selected_version_reviews = r_resp.json().get("reviews", [])
+                self.set_toast("Review queued.", is_error=False)
+                self.run_review_is_submitting = False
+                self.selected_project_id = ""  # force sidebar to re-expand on nav
+                yield AppState.start_review_status_poll(review_id, self.run_review_version_id)
+                yield rx.redirect("/")
+                return
             except httpx.HTTPStatusError as exc:
                 self.set_toast(self._extract_error(exc), is_error=True)
             except httpx.RequestError as exc:
                 self.set_toast(f"Network error: {exc}", is_error=True)
+        self.run_review_is_submitting = False
+
+    # ── Milestone 4: Review status polling ────────────────────────────────────
+
+    @rx.event(background=True)
+    async def start_review_status_poll(self, review_id: str, version_id: str):
+        """Poll GET /api/reviews/{review_id}/status every 3s until terminal.
+
+        On completion, reloads the version's review list and the project tree
+        so the sidebar/version pane reflect the new review node without a
+        manual refresh (Milestone 4.5 / 4.9).
+        """
+        import asyncio as _asyncio
+
+        async with self:
+            self.active_review_id = review_id
+            self.active_review_status = "queued"
+            self.active_review_progress_message = ""
+            self.review_poll_active = True
+
+        terminal = False
+        while not terminal:
+            await _asyncio.sleep(3)
+            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+                try:
+                    resp = await client.get(
+                        f"{_API_BASE}/api/reviews/{review_id}/status"
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception as exc:
+                    async with self:
+                        self.active_review_status = "failed"
+                        self.active_review_progress_message = f"Polling error: {exc}"
+                        self.review_poll_active = False
+                    return
+
+            status = data.get("status", "queued")
+            async with self:
+                self.active_review_status = status
+                self.active_review_progress_message = data.get(
+                    "progress_message"
+                ) or ""
+
+            if status in ("complete", "failed"):
+                terminal = True
+
+        async with self:
+            self.review_poll_active = False
+
+        if status == "failed":
+            async with self:
+                self.set_toast(
+                    self.active_review_progress_message or "Review failed.",
+                    is_error=True,
+                )
+            return
+
+        # status == "complete" — refresh version reviews + full project tree
+        # (Milestone 4.9: the sidebar reads selected_project["nodes"], which
+        # only the project-detail endpoint returns — the flat projects[] list
+        # only carries aggregate counts).
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                r_resp = await client.get(
+                    f"{_API_BASE}/api/versions/{version_id}/reviews"
+                )
+                r_resp.raise_for_status()
+                reviews = r_resp.json().get("reviews", [])
+            except Exception:
+                reviews = None
+
+            current_project_id = self.selected_project_id
+            project_detail = None
+            if current_project_id:
+                try:
+                    p_resp = await client.get(
+                        f"{_API_BASE}/api/projects/{current_project_id}"
+                    )
+                    p_resp.raise_for_status()
+                    project_detail = p_resp.json()
+                except Exception:
+                    project_detail = None
+
+            try:
+                pl_resp = await client.get(f"{_API_BASE}/api/projects")
+                pl_resp.raise_for_status()
+                raw_projects = pl_resp.json().get("projects", [])
+            except Exception:
+                raw_projects = None
+
+        async with self:
+            if reviews is not None and self.selected_version_id == version_id:
+                self.selected_version_reviews = reviews
+            if project_detail is not None and self.selected_project_id == current_project_id:
+                self.selected_project = project_detail
+            if raw_projects is not None:
+                self.projects = [_normalize_project(p) for p in raw_projects]
+            self.set_toast("Review complete.", is_error=False)
+
+    def dismiss_review_status(self) -> None:
+        self.active_review_id = ""
+        self.active_review_status = ""
+        self.active_review_progress_message = ""
+        self.review_poll_active = False
+
+    # ── Milestone 4: Proposals ─────────────────────────────────────────────────
+
+    async def generate_proposal(self) -> None:
+        """POST /api/proposals for the currently selected review node."""
+        review_id = self.selected_node_id
+        if not review_id:
+            self.set_toast("No review selected.", is_error=True)
+            return
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.post(
+                    f"{_API_BASE}/api/proposals",
+                    json={"review_id": review_id},
+                )
+                resp.raise_for_status()
+                proposal_id = resp.json().get("proposal_id", "")
+                self.proposals_by_review = {
+                    **self.proposals_by_review,
+                    review_id: {"proposal_id": proposal_id, "status": "queued"},
+                }
+                self.set_toast("Proposal generation queued.", is_error=False)
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+                return
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+                return
+        yield AppState.start_proposal_status_poll(proposal_id, review_id)
+
+    @rx.event(background=True)
+    async def start_proposal_status_poll(self, proposal_id: str, review_id: str):
+        """Poll GET /api/proposals/{proposal_id}/status every 3s until terminal."""
+        import asyncio as _asyncio
+
+        async with self:
+            self.active_proposal_id = proposal_id
+            self.active_proposal_status = "queued"
+            self.active_proposal_progress_message = ""
+            self.proposal_poll_active = True
+
+        status = "queued"
+        terminal = False
+        while not terminal:
+            await _asyncio.sleep(3)
+            async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+                try:
+                    resp = await client.get(
+                        f"{_API_BASE}/api/proposals/{proposal_id}/status"
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception as exc:
+                    async with self:
+                        self.active_proposal_status = "failed"
+                        self.active_proposal_progress_message = (
+                            f"Polling error: {exc}"
+                        )
+                        self.proposal_poll_active = False
+                        self.proposals_by_review = {
+                            **self.proposals_by_review,
+                            review_id: {
+                                "proposal_id": proposal_id, "status": "failed"
+                            },
+                        }
+                    return
+
+            status = data.get("status", "queued")
+            async with self:
+                self.active_proposal_status = status
+                self.active_proposal_progress_message = data.get(
+                    "progress_message"
+                ) or ""
+                self.proposals_by_review = {
+                    **self.proposals_by_review,
+                    review_id: {
+                        "proposal_id": proposal_id,
+                        "status": status,
+                        "progress_message": data.get("progress_message"),
+                        "report": data.get("report") or {},
+                    },
+                }
+
+            if status in ("complete", "failed"):
+                terminal = True
+
+        async with self:
+            self.proposal_poll_active = False
+            if status == "failed":
+                self.set_toast(
+                    self.active_proposal_progress_message
+                    or "Proposal generation failed.",
+                    is_error=True,
+                )
+            else:
+                self.set_toast("Proposal ready.", is_error=False)
 
     async def refresh_projects(self) -> None:
         """Reload the projects list — used by the sidebar refresh button."""

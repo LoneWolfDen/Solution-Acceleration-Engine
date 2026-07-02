@@ -11,6 +11,7 @@ import reflex as rx
 
 from web.state import AppState
 from web.components.finding_card import finding_card
+from web.components.status_banner import proposal_status_banner
 
 
 def _count_pill(label: str, count: rx.Var, color: str) -> rx.Component:
@@ -79,6 +80,105 @@ def _review_header() -> rx.Component:
     )
 
 
+def _proposal_report_view(report: rx.Var) -> rx.Component:
+    return rx.vstack(
+        rx.hstack(
+            rx.icon("file-text", size=14, color="var(--gray-10)"),
+            rx.text(
+                "Executive Summary", size="1", weight="bold", color_scheme="gray",
+                text_transform="uppercase", letter_spacing="0.08em",
+            ),
+            spacing="2",
+            align="center",
+        ),
+        rx.text(report["executive_summary"].to(str), size="2"),
+        rx.hstack(
+            rx.text("Delivery Confidence:", size="2", weight="medium"),
+            rx.badge(
+                rx.fragment(report["delivery_confidence_score"].to(int).to(str), " / 100"),
+                color_scheme=rx.cond(
+                    report["delivery_confidence_score"].to(int) >= 60, "green", "red"
+                ),
+                variant="soft",
+            ),
+            rx.badge(
+                rx.cond(
+                    report["ready_for_approval"].to(bool),
+                    "Ready for Approval",
+                    "Needs Revision",
+                ),
+                color_scheme=rx.cond(
+                    report["ready_for_approval"].to(bool), "green", "amber"
+                ),
+                variant="soft",
+            ),
+            spacing="3",
+            align="center",
+        ),
+        rx.cond(
+            report["actionable_recommendations"].to(list[str]).length() > 0,
+            rx.vstack(
+                rx.text("Recommendations", size="1", weight="bold", color_scheme="gray"),
+                rx.unordered_list(
+                    rx.foreach(
+                        report["actionable_recommendations"].to(list[str]),
+                        lambda rec: rx.list_item(rec, size="2"),
+                    ),
+                ),
+                spacing="2",
+                align="start",
+                width="100%",
+            ),
+            rx.fragment(),
+        ),
+        spacing="3",
+        align="start",
+        width="100%",
+        padding="1rem",
+        background="var(--gray-2)",
+        border="1px solid var(--gray-4)",
+        border_radius="8px",
+    )
+
+
+def _proposal_pane() -> rx.Component:
+    return rx.vstack(
+        rx.hstack(
+            rx.icon("sparkles", size=14, color="var(--gray-10)"),
+            rx.text(
+                "Proposal",
+                size="1",
+                weight="bold",
+                color_scheme="gray",
+                text_transform="uppercase",
+                letter_spacing="0.08em",
+            ),
+            spacing="2",
+            align="center",
+        ),
+        proposal_status_banner(),
+        rx.cond(
+            AppState.current_proposal_exists,
+            rx.cond(
+                AppState.current_proposal_status == "complete",
+                _proposal_report_view(AppState.current_proposal_report),
+                rx.fragment(),
+            ),
+            rx.button(
+                rx.icon("sparkles", size=13),
+                "Generate Proposal",
+                variant="soft",
+                color_scheme="indigo",
+                disabled=AppState.selected_node_status != "complete",
+                on_click=AppState.generate_proposal,
+            ),
+        ),
+        spacing="3",
+        align="start",
+        width="100%",
+    )
+
+
 def review_detail_pane() -> rx.Component:
     return rx.box(
         rx.scroll_area(
@@ -121,6 +221,8 @@ def review_detail_pane() -> rx.Component:
                         width="100%",
                     ),
                 ),
+                rx.separator(width="100%"),
+                _proposal_pane(),
                 spacing="4",
                 align="start",
                 width="100%",

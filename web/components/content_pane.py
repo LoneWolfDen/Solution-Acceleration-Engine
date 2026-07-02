@@ -12,6 +12,7 @@ import reflex as rx
 from web.state import AppState
 from web.components.review_detail import review_detail_pane
 from web.components.version_detail import version_detail
+from web.components.status_banner import review_status_banner
 
 
 def _welcome_view() -> rx.Component:
@@ -52,6 +53,16 @@ def _loading_view() -> rx.Component:
 
 def content_pane() -> rx.Component:
     return rx.box(
+        rx.box(
+            review_status_banner(),
+            position="absolute",
+            top="1rem",
+            right="1rem",
+            left="1rem",
+            z_index="10",
+            max_width="420px",
+            margin_left="auto",
+        ),
         rx.cond(
             AppState.is_loading,
             _loading_view(),
@@ -69,4 +80,5 @@ def content_pane() -> rx.Component:
         height="100vh",
         overflow="hidden",
         background="var(--gray-1)",
+        position="relative",
     )
