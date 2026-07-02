@@ -88,7 +88,7 @@ def triage_widget() -> rx.Component:
                 color_scheme="indigo",
                 variant="solid",
                 disabled=~AppState.can_create_version,
-                on_click=AppState.create_version_from_triage(AppState.version_name),
+                on_click=AppState.submit_version_from_triage,
             ),
             width="100%",
             align="center",

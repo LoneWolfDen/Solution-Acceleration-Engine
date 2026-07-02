@@ -500,11 +500,30 @@ class AppState(rx.State):
                 self.set_toast(
                     f"Version '{data.get('name', '')}' created.", is_error=False)
                 self.artifact_ingestion_open = False
-                await self.select_project(self.selected_project_id)
+                # Refresh the project detail so the new version appears in the
+                # sidebar. Cannot call `await self.select_project(...)` because
+                # select_project is an async generator (it yields) and awaiting
+                # a generator raises TypeError.
+                p_resp = await client.get(
+                    f"{_API_BASE}/api/projects/{self.selected_project_id}"
+                )
+                p_resp.raise_for_status()
+                self.selected_project = p_resp.json()
             except httpx.HTTPStatusError as exc:
                 self.set_toast(self._extract_error(exc), is_error=True)
             except httpx.RequestError as exc:
                 self.set_toast(f"Network error: {exc}", is_error=True)
+
+    async def submit_version_from_triage(self) -> None:
+        """Called by the triage Create Version button.
+
+        Reads version_name from state so the component does not need to pass
+        a state var as an event argument (which is unreliable in older Reflex
+        versions). Resets version_name to the default after the call.
+        """
+        name = self.version_name.strip() or "Version 1"
+        await self.create_version_from_triage(name)
+        self.version_name = "Version 1"
 
     # ── Milestone 3: Admin ────────────────────────────────────────────────────
 
