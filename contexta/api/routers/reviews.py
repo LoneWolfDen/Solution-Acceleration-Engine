@@ -3,7 +3,8 @@ contexta/api/routers/reviews.py
 
 GET  /api/versions/{version_id}/reviews  — list review jobs for a version
 GET  /api/nodes/{node_id}                — full Review_Payload for a review job
-POST /api/reviews                        — trigger pipeline (stub with logging)
+POST /api/reviews                        — trigger the real 12-dimension pipeline
+                                            (contexta.api.pipeline_bridge, Milestone 4)
 GET  /api/reviews/{review_id}/status     — poll async status
 """
 
@@ -66,10 +67,25 @@ def _build_review_payload(job: "api_repo.ReviewJobRow", node: Optional[object]) 
 
     from contexta.models.payloads import ReviewNodePayload
 
+    # ``commit_exploration_node()`` writes all 12 dimension payloads into
+    # metadata_json["dimensions"]; content_markdown only holds the first
+    # dimension's payload (used as a schema-guard representative). The full
+    # Review_Payload response must aggregate findings across all 12.
     try:
-        payload = ReviewNodePayload.model_validate_json(node.content_markdown)
+        raw_metadata = node.metadata_json
+        metadata = (
+            json.loads(raw_metadata) if isinstance(raw_metadata, str) else raw_metadata
+        )
+        dimension_dicts = metadata.get("dimensions") or []
+        payloads = [
+            ReviewNodePayload.model_validate(d) for d in dimension_dicts
+        ]
+        if not payloads:
+            # Fall back to the single payload stored in content_markdown
+            # (covers nodes written before Milestone 4 wiring, or tests).
+            payloads = [ReviewNodePayload.model_validate_json(node.content_markdown)]
     except Exception:
-        logger.warning("Could not parse ReviewNodePayload for node %s", node.id)
+        logger.warning("Could not parse ReviewNodePayload(s) for node %s", node.id)
         return schemas.ReviewPayloadResponse(
             review_id=job.id,
             project_id=node.project_id,
@@ -80,27 +96,26 @@ def _build_review_payload(job: "api_repo.ReviewJobRow", node: Optional[object]) 
         )
 
     findings: list[schemas.FindingItem] = []
-    for f in payload.findings:
-        source = f.citations[0].file_path if f.citations else "unknown"
-        excerpt = f.citations[0].excerpt if f.citations else ""
-        findings.append(
-            schemas.FindingItem(
-                finding_id=str(uuid.uuid4()),
-                type=f.dimension.value,
-                severity=_CONFIDENCE_SEVERITY.get(f.confidence.value, "MEDIUM"),
-                text=f.summary,
-                source_artifact=source,
-                citation=excerpt,
-            )
-        )
-
     summary_counts: dict[str, int] = {
         "risks": 0, "constraints": 0, "dependencies": 0,
         "assumptions": 0, "action_items": 0,
     }
-    for f in payload.findings:
-        cat = _DIMENSION_CATEGORY.get(f.dimension, "assumptions")
-        summary_counts[cat] += 1
+    for payload in payloads:
+        for f in payload.findings:
+            source = f.citations[0].file_path if f.citations else "unknown"
+            excerpt = f.citations[0].excerpt if f.citations else ""
+            findings.append(
+                schemas.FindingItem(
+                    finding_id=str(uuid.uuid4()),
+                    type=f.dimension.value,
+                    severity=_CONFIDENCE_SEVERITY.get(f.confidence.value, "MEDIUM"),
+                    text=f.summary,
+                    source_artifact=source,
+                    citation=excerpt,
+                )
+            )
+            cat = _DIMENSION_CATEGORY.get(f.dimension, "assumptions")
+            summary_counts[cat] += 1
 
     return schemas.ReviewPayloadResponse(
         review_id=job.id,
@@ -112,30 +127,6 @@ def _build_review_payload(job: "api_repo.ReviewJobRow", node: Optional[object]) 
         findings=findings,
         summary=schemas.FindingsSummary(**summary_counts),
     )
-
-
-# ─── Stub background task ─────────────────────────────────────────────────────
-
-async def _stub_pipeline_task(review_id: str, db_path: str) -> None:
-    """
-    Milestone 1 stub — logs pipeline trigger.  No LLM calls are made.
-    Sets status to 'complete' immediately so polling returns a terminal state.
-    Wired to the real pipeline in Milestone 4.
-    """
-    import aiosqlite as _aiosqlite
-    from contexta.db.schema import init_database
-
-    logger.info("[INFO] Pipeline review triggered for Review ID %s", review_id)
-    logger.info("[STUB] Pipeline not yet wired — marking review %s as complete.", review_id)
-
-    conn = await init_database(db_path)
-    try:
-        await api_repo.update_review_job_status(
-            conn, review_id, "complete",
-            progress_message="Stub complete — pipeline wiring pending (Milestone 4).",
-        )
-    finally:
-        await conn.close()
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -205,8 +196,11 @@ async def create_review(
     )
 
     from contexta.api.config import load_api_config
+    from contexta.api.pipeline_bridge import run_review_pipeline_task
     db_path = load_api_config().db_path
-    background_tasks.add_task(_stub_pipeline_task, job.id, db_path)
+    background_tasks.add_task(
+        run_review_pipeline_task, job.id, db_path, body.backend
+    )
 
     logger.info(
         "[INFO] Pipeline review triggered for Review ID %s (version=%s, roles=%s)",

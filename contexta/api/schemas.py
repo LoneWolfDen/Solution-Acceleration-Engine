@@ -172,6 +172,7 @@ class CreateReviewRequest(BaseModel):
     version_id: str
     persona_roles: List[str]
     context: str = ""
+    backend: Optional[str] = None  # "groq" | "openrouter" | "gemini" | "ollama"
 
 
 class CreateReviewResponse(BaseModel):
@@ -203,6 +204,7 @@ class ProposalStatusResponse(BaseModel):
     proposal_id: str
     status: str
     progress_message: Optional[str] = None
+    report: Optional[dict] = None
     error: Optional[str] = None
 
 
