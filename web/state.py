@@ -14,7 +14,6 @@ API URL:
 """
 
 from __future__ import annotations
-from contexta.api.schemas import FindingItem, VersionDetailResponse
 import json
 import logging
 import os
@@ -93,6 +92,17 @@ class AppState(rx.State):
     toast_message: str = ""
     toast_is_error: bool = False
 
+    # ── New Project dialog ────────────────────────────────────────────────────
+    new_project_name: str = ""
+    new_project_dialog_open: bool = False
+
+    # ── Version name input (triage widget) ────────────────────────────────────
+    version_name: str = "Version 1"
+
+    # ── Trigger Review dialog ─────────────────────────────────────────────────
+    review_trigger_open: bool = False
+    review_persona: str = "Solution Architect"
+
     # ── Computed vars ─────────────────────────────────────────────────────────
 
     @rx.var(cache=True)
@@ -106,16 +116,9 @@ class AppState(rx.State):
     @rx.var(cache=True)
     def current_node(self) -> dict:
         return self.selected_node
-    """
     @rx.var(cache=True)
-    def current_findings(self) -> list:
+    def current_findings(self) -> list[dict]:
         return self.selected_node.get("findings", [])
-    """
-    @rx.var(cache=True)
-    def current_findings(self) -> list[FindingItem]:
-        # If the API returns a list of raw dicts, convert them:
-        raw_data = self.selected_node.get("findings", [])
-        return [FindingItem(**item) for item in raw_data]
 
     @rx.var(cache=True)
     def current_version(self) -> dict:
@@ -594,6 +597,107 @@ class AppState(rx.State):
                 self.set_toast(self._extract_error(exc), is_error=True)
             except httpx.RequestError as exc:
                 self.set_toast(f"Network error: {exc}", is_error=True)
+
+    # ── New Project ───────────────────────────────────────────────────────────
+
+    def open_new_project_dialog(self) -> None:
+        self.new_project_name = ""
+        self.new_project_dialog_open = True
+
+    def set_new_project_name(self, name: str) -> None:
+        self.new_project_name = name
+
+    def close_new_project_dialog(self) -> None:
+        self.new_project_dialog_open = False
+        self.new_project_name = ""
+
+    async def create_project(self) -> None:
+        name = self.new_project_name.strip()
+        if not name:
+            self.set_toast("Project name is required.", is_error=True)
+            return
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.post(
+                    f"{_API_BASE}/api/projects",
+                    json={"name": name, "global_tags": []},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                self.set_toast(f"Project '{data['name']}' created.", is_error=False)
+                self.new_project_dialog_open = False
+                self.new_project_name = ""
+                p_resp = await client.get(f"{_API_BASE}/api/projects")
+                p_resp.raise_for_status()
+                raw = p_resp.json().get("projects", [])
+                self.projects = [_normalize_project(p) for p in raw]
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+
+    # ── Version name ──────────────────────────────────────────────────────────
+
+    def set_version_name(self, name: str) -> None:
+        self.version_name = name
+
+    # ── Trigger Review ────────────────────────────────────────────────────────
+
+    def set_review_persona(self, persona: str) -> None:
+        self.review_persona = persona
+
+    def open_review_trigger(self) -> None:
+        self.review_persona = "Solution Architect"
+        self.review_trigger_open = True
+
+    def close_review_trigger(self) -> None:
+        self.review_trigger_open = False
+
+    async def trigger_review(self) -> None:
+        if not self.selected_version_id:
+            self.set_toast("No version selected.", is_error=True)
+            return
+        persona = self.review_persona.strip() or "Solution Architect"
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.post(
+                    f"{_API_BASE}/api/reviews",
+                    json={
+                        "version_id": self.selected_version_id,
+                        "persona_roles": [persona],
+                        "context": "",
+                    },
+                )
+                resp.raise_for_status()
+                review_id = resp.json().get("review_id", "")
+                self.set_toast(
+                    f"Review triggered (ID: {review_id[:8]}…)", is_error=False
+                )
+                self.review_trigger_open = False
+                r_resp = await client.get(
+                    f"{_API_BASE}/api/versions/{self.selected_version_id}/reviews"
+                )
+                r_resp.raise_for_status()
+                self.selected_version_reviews = r_resp.json().get("reviews", [])
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+
+    async def refresh_projects(self) -> None:
+        """Reload the projects list — used by the sidebar refresh button."""
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.get(f"{_API_BASE}/api/projects")
+                resp.raise_for_status()
+                raw = resp.json().get("projects", [])
+                self.projects = [_normalize_project(p) for p in raw]
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(
+                    f"Cannot reach API at {_API_BASE}: {exc}", is_error=True
+                )
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
