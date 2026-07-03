@@ -1,98 +1,105 @@
 """
-contexta/api/__init__.py — FastAPI application factory.
+contexta/api/__init__.py — FastAPI application entry point.
 
-Exposes a ``create_app(db_path)`` factory so tests can inject an in-memory
-SQLite DB.  The module-level ``app`` uses the path from ContextaConfig.
+Mounts all six route groups under /api and applies the standardised
+error-envelope middleware so every HTTP error returns {"error": "..."}.
 
-Startup lifecycle:
-  1. Open aiosqlite connection (or reuse one injected by tests).
-  2. Run DB migrations.
-  3. Initialise AdminConfigStore.
-  4. Register all sub-routers.
-  5. Attach global exception handler.
+Run with:
+    uvicorn contexta.api:app --host 0.0.0.0 --port 8000
 """
 
 from __future__ import annotations
 
-import logging
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import aiosqlite
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .config_store import AdminConfigStore
+from ..db.schema import init_database
+from .config import load_api_config
 from .routers import admin, artifacts, projects, proposals, reviews, versions
 
-logger = logging.getLogger(__name__)
+# ── DB path resolution ────────────────────────────────────────────────────────
+# Sourced from WebAPIConfig so the main app and background pipeline tasks
+# (contexta/api/pipeline_bridge.py, invoked via load_api_config().db_path)
+# always resolve to the same database file.
+_DB_PATH: str = load_api_config().db_path
+
+# ── CORS origin resolution ────────────────────────────────────────────────────
+_CODESPACE_NAME: str = os.environ.get("CODESPACE_NAME", "")
+
+if _CODESPACE_NAME:
+    _cors_origins: list[str] = [
+        f"https://{_CODESPACE_NAME}-3000.app.github.dev",
+        f"https://{_CODESPACE_NAME}-8001.app.github.dev",
+        "http://localhost:3000",
+        "http://localhost:8001",
+    ]
+else:
+    _cors_origins = ["*"]
 
 
-def _register_routers(application: FastAPI) -> None:
-    application.include_router(projects.router)
-    application.include_router(versions.router)
-    application.include_router(reviews.router)
-    application.include_router(artifacts.router)
-    application.include_router(proposals.router)
-    application.include_router(admin.router)
+# ── Lifespan ───────────────────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    app.state.db = await init_database(_DB_PATH)
+    yield
+    await app.state.db.close()
 
 
-def create_app(db_path: str | None = None) -> FastAPI:
-    """
-    Build and return a configured FastAPI application.
+# ── App ───────────────────────────────────────────────────────────────────────
+app = FastAPI(
+    title="Contexta API",
+    version="0.1.0",
+    description=(
+        "REST API for the Solution Acceleration Engine. "
+        "Every response carries an `error` field: null on success, "
+        "a human-readable string on failure."
+    ),
+    lifespan=lifespan,
+)
 
-    Args:
-        db_path: SQLite database path.  When None, reads from ContextaConfig.
-                 Pass ``":memory:"`` in tests for full isolation.
-    """
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=(_cors_origins != ["*"]),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    @asynccontextmanager
-    async def lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
-        # ── Resolve DB path ───────────────────────────────────────────────────
-        path = db_path
-        if path is None:
-            try:
-                from ..config import load_config
-                cfg = load_config()
-                path = cfg.db_path
-            except Exception:
-                path = "/data/contexta.db"
 
-        # ── Open DB + run migrations ──────────────────────────────────────────
-        from ..db.schema import init_database
-        conn = await init_database(path)
-        application.state.db = conn
-        application.state.config_store = AdminConfigStore()
-
-        logger.info("API started — DB: %s", path)
-        yield
-
-        # ── Shutdown ──────────────────────────────────────────────────────────
-        await conn.close()
-        logger.info("API shutdown — DB connection closed.")
-
-    application = FastAPI(
-        title="Contexta API",
-        description="Solution Acceleration Engine — REST API",
-        version="1.0.0",
-        lifespan=lifespan,
+# ── Consistent error envelope ─────────────────────────────────────────────────
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": str(exc.detail)},
     )
 
-    _register_routers(application)
 
-    # ── Global exception handler ──────────────────────────────────────────────
-    @application.exception_handler(Exception)
-    async def _unhandled_exception_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
-        logger.exception("Unhandled exception on %s", request.url.path)
-        return JSONResponse(
-            status_code=500,
-            content={"error": f"Internal server error: {exc}"},
-        )
-
-    return application
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=500,
+        content={"error": f"Internal server error: {exc}"},
+    )
 
 
-# Module-level app used by ``uvicorn contexta.api:app``
-app = create_app()
+# ── Health probe ──────────────────────────────────────────────────────────────
+@app.get("/api/health", tags=["system"])
+async def health() -> dict:
+    return {"status": "ok", "version": "0.1.0", "error": None}
+
+
+# ── Mount all routers ─────────────────────────────────────────────────────────
+app.include_router(projects.router, prefix="/api")
+app.include_router(versions.router, prefix="/api")
+app.include_router(artifacts.router, prefix="/api")
+app.include_router(reviews.router, prefix="/api")
+app.include_router(proposals.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")

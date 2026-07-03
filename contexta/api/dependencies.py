@@ -1,23 +1,21 @@
 """
-contexta/api/dependencies.py — FastAPI dependency injection helpers.
+contexta/api/dependencies.py — FastAPI dependency injection providers.
 
-get_db()     — yields an aiosqlite connection from app state.
-get_config() — returns the AdminConfigStore singleton from app state.
+get_db() yields the single aiosqlite connection stored on app.state.
+All route handlers receive this connection via Depends(get_db).
 """
 
 from __future__ import annotations
 
-from typing import AsyncGenerator
-
 import aiosqlite
-from fastapi import Depends, Request
+from fastapi import Request
 
 
-async def get_db(request: Request) -> AsyncGenerator[aiosqlite.Connection, None]:
-    """Yield the shared aiosqlite connection stored in app.state.db."""
-    yield request.app.state.db
+async def get_db(request: Request) -> aiosqlite.Connection:
+    """
+    Yield the shared aiosqlite connection from application state.
 
-
-async def get_config(request: Request) -> "AdminConfigStore":  # type: ignore[name-defined]
-    """Return the AdminConfigStore singleton from app state."""
-    return request.app.state.config_store
+    The connection is opened once during application startup (lifespan) and
+    closed on shutdown.  Route handlers must not close it themselves.
+    """
+    return request.app.state.db

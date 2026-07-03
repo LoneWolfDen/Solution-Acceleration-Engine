@@ -1,239 +1,212 @@
 """
 contexta/api/routers/artifacts.py
 
-GET    /api/projects/{project_id}/artifacts
-POST   /api/artifacts
-PATCH  /api/artifacts/{artifact_id}
-DELETE /api/artifacts/{artifact_id}
-GET    /api/artifacts/suggestions
+GET    /api/projects/{project_id}/artifacts  — list artifacts (with is_active)
+POST   /api/artifacts                        — ingest upload / paste / url
+PATCH  /api/artifacts/{id}                   — toggle is_active
+DELETE /api/artifacts/{id}                   — hard delete
+GET    /api/artifacts/suggestions            — regex-based tag hints (no LLM)
 """
 
 from __future__ import annotations
 
-import json
+import logging
+import os
 import re
-from typing import List
+from typing import Optional
 
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
-from ...db import repositories as repo
-from ..dependencies import get_db
-from ..schemas import (
-    ArtifactCreateRequest,
-    ArtifactCreateResponse,
-    ArtifactDeleteResponse,
-    ArtifactListResponse,
-    ArtifactPatchRequest,
-    ArtifactPatchResponse,
-    ArtifactSuggestionsResponse,
-    ArtifactSummary,
-)
+from contexta.api import repositories as api_repo
+from contexta.api import schemas
+from contexta.api.dependencies import get_db
+from contexta.db import repositories as db_repo
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["artifacts"])
 
-# ── Tag suggestion rules — regex/file-type ONLY, no LLM calls ─────────────────
+# ─── Tag suggestion rules (regex-based, zero LLM) ────────────────────────────
 
-_EXTENSION_TAGS: dict[str, list[str]] = {
-    ".md": ["markdown", "documentation"],
-    ".pdf": ["pdf", "document"],
-    ".docx": ["word", "document"],
-    ".txt": ["text", "plain"],
-    ".py": ["python", "code"],
-    ".json": ["json", "data"],
-    ".yaml": ["yaml", "config"],
-    ".yml": ["yaml", "config"],
-    ".csv": ["csv", "data"],
+_EXTENSION_TAGS: dict[str, str] = {
+    ".md": "markdown", ".txt": "text", ".pdf": "pdf",
+    ".docx": "word", ".xlsx": "spreadsheet", ".csv": "csv",
+    ".json": "json", ".yaml": "yaml", ".yml": "yaml",
 }
 
-_KEYWORD_TAGS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"\bstatement\s+of\s+work\b", re.I), "sow"),
-    (re.compile(r"\bsow\b", re.I), "sow"),
-    (re.compile(r"\barchitecture\b", re.I), "architecture"),
-    (re.compile(r"\brequirements?\b", re.I), "requirements"),
-    (re.compile(r"\bproposal\b", re.I), "proposal"),
-    (re.compile(r"\bscope\b", re.I), "scope"),
-    (re.compile(r"\bresource\b", re.I), "resources"),
-    (re.compile(r"\brisk\b", re.I), "risk"),
-    (re.compile(r"\btimeline\b", re.I), "timeline"),
-    (re.compile(r"\bbankingbank\b|\bfinancial\b|\bfinance\b", re.I), "finance"),
-    (re.compile(r"\bpharma\b|\bpharmaceutical\b", re.I), "pharma"),
-    (re.compile(r"\bdrone\b", re.I), "drone"),
+_CONTENT_PATTERNS: list[tuple[str, str]] = [
+    (r"(?i)\bstatement\s+of\s+work\b|\bsow\b", "sow"),
+    (r"(?i)\barchitecture\b", "architecture"),
+    (r"(?i)\brequirements?\b", "requirements"),
+    (r"(?i)\brisk\b", "risk"),
+    (r"(?i)\bproposal\b", "proposal"),
+    (r"(?i)\bresource\s+plan\b", "resource-plan"),
+    (r"(?i)\bnon-functional\b|\bnfr\b", "nfr"),
+    (r"(?i)\btimeline\b|\bschedule\b", "timeline"),
+    (r"(?i)\bbudget\b|\bcost\b", "budget"),
+    (r"(?i)\bscope\b", "scope"),
+    (r"(?i)\bdelivery\b|\bdeliverable\b", "delivery"),
+    (r"(?i)\bsecurity\b", "security"),
+    (r"(?i)\bcompliance\b|\bregulat", "compliance"),
+    (r"(?i)\binfrastructure\b|\bcloud\b", "infrastructure"),
 ]
 
 
-def _suggest_tags(filename: str, content_preview: str) -> List[str]:
-    """Return tag suggestions from filename extension and keyword analysis only."""
-    suggestions: set[str] = set()
+def _derive_suggestions(filename: str, content_preview: str) -> list[str]:
+    """Return deduplicated tag suggestions from filename extension and content."""
+    seen: set[str] = set()
+    tags: list[str] = []
 
-    # Extension-based tags.
-    for ext, tags in _EXTENSION_TAGS.items():
-        if filename.lower().endswith(ext):
-            suggestions.update(tags)
+    _, ext = os.path.splitext(filename.lower())
+    if ext in _EXTENSION_TAGS:
+        tag = _EXTENSION_TAGS[ext]
+        seen.add(tag)
+        tags.append(tag)
 
-    # Keyword-based tags from filename + content preview.
-    combined = f"{filename} {content_preview}"
-    for pattern, tag in _KEYWORD_TAGS:
-        if pattern.search(combined):
-            suggestions.add(tag)
+    for pattern, tag in _CONTENT_PATTERNS:
+        if tag not in seen and re.search(pattern, content_preview[:500]):
+            seen.add(tag)
+            tags.append(tag)
 
-    return sorted(suggestions)
-
-
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+    return tags
 
 
-@router.get("/api/projects/{project_id}/artifacts", response_model=ArtifactListResponse)
+# ─── Routes ───────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/projects/{project_id}/artifacts",
+    response_model=schemas.ArtifactListResponse,
+)
 async def list_artifacts(
     project_id: str,
-    db: aiosqlite.Connection = Depends(get_db),
-) -> ArtifactListResponse:
-    project = await repo.get_project(db, project_id)
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> schemas.ArtifactListResponse:
+    """Return all artifacts for a project.  is_active is explicit on every item."""
+    project = await db_repo.get_project(conn, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
 
-    cursor = await db.execute(
-        "SELECT id, node_name, metadata_json, created_at FROM nodes "
-        "WHERE project_id = ? AND layer_type = 'exploration' ORDER BY created_at",
-        (project_id,),
-    )
-    rows = await cursor.fetchall()
-
-    artifacts: list[ArtifactSummary] = []
-    for row in rows:
-        meta = json.loads(row["metadata_json"] or "{}")
-        artifacts.append(
-            ArtifactSummary(
-                artifact_id=row["id"],
-                title=row["node_name"],
-                tags=meta.get("tags", []),
-                is_active=bool(meta.get("is_active", True)),
-                created_at=row["created_at"],
+    artifacts = await api_repo.list_artifacts_for_project(conn, project_id)
+    return schemas.ArtifactListResponse(
+        artifacts=[
+            schemas.ArtifactItem(
+                artifact_id=a.id,
+                title=a.title,
+                tags=a.tags,
+                is_active=a.is_active,
+                created_at=a.created_at,
             )
-        )
-    return ArtifactListResponse(artifacts=artifacts, error=None)
+            for a in artifacts
+        ]
+    )
 
 
-@router.post("/api/artifacts", response_model=ArtifactCreateResponse, status_code=201)
+@router.post("/artifacts", response_model=schemas.ArtifactResponse, status_code=201)
 async def create_artifact(
-    body: ArtifactCreateRequest,
-    db: aiosqlite.Connection = Depends(get_db),
-) -> ArtifactCreateResponse:
-    if body.source not in ("upload", "paste", "url"):
-        raise HTTPException(
-            status_code=422,
-            detail="source must be 'upload', 'paste', or 'url'.",
-        )
-    if body.source == "url" and not body.url:
-        raise HTTPException(
-            status_code=422,
-            detail="url is required when source='url'.",
-        )
-    if body.source == "paste" and not body.content:
-        raise HTTPException(
-            status_code=422,
-            detail="content is required when source='paste'.",
-        )
-    if not body.title.strip():
-        raise HTTPException(status_code=422, detail="title must not be empty.")
+    project_id: str = Form(...),
+    title: str = Form(...),
+    source: str = Form(...),
+    content: str = Form(""),
+    url: str = Form(""),
+    tags: str = Form("[]"),           # JSON-encoded string array
+    file: Optional[UploadFile] = File(None),
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> schemas.ArtifactResponse:
+    """Ingest an artifact via file upload, pasted text, or URL reference."""
+    import json as _json
 
-    project = await repo.get_project(db, body.project_id)
+    valid_sources = {"upload", "paste", "url"}
+    if source not in valid_sources:
+        raise HTTPException(
+            status_code=422, detail=f"source must be one of {sorted(valid_sources)}."
+        )
+
+    project = await db_repo.get_project(conn, project_id)
     if project is None:
-        raise HTTPException(
-            status_code=404, detail=f"Project '{body.project_id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
 
-    from datetime import datetime, timezone
+    try:
+        tag_list: list[str] = _json.loads(tags)
+        if not isinstance(tag_list, list):
+            raise ValueError
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=422, detail="tags must be a JSON array of strings.")
 
-    import uuid
+    body_content = content
+    filename: Optional[str] = None
+    source_url: Optional[str] = None
 
-    node_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
+    if source == "upload":
+        if file is None:
+            raise HTTPException(status_code=422, detail="A file must be provided for source='upload'.")
+        raw = await file.read()
+        body_content = raw.decode("utf-8", errors="replace")
+        filename = file.filename
+    elif source == "url":
+        if not url:
+            raise HTTPException(status_code=422, detail="url must be provided for source='url'.")
+        source_url = url
+    elif source == "paste":
+        if not content:
+            raise HTTPException(status_code=422, detail="content must be provided for source='paste'.")
 
-    meta = {
-        "tags": body.tags,
-        "is_active": True,
-        "source": body.source,
-        "url": body.url,
-    }
-    content = body.content or body.url or ""
-
-    await db.execute(
-        """
-        INSERT INTO nodes
-            (id, project_id, parent_id, layer_type, node_name,
-             metadata_json, content_markdown, created_at, version_tag, version_id)
-        VALUES (?, ?, NULL, 'exploration', ?, ?, ?, ?, NULL, NULL)
-        """,
-        (node_id, body.project_id, body.title, json.dumps(meta), content, now),
+    artifact = await api_repo.create_artifact(
+        conn,
+        project_id=project_id,
+        title=title,
+        content=body_content,
+        source=source,
+        tags=tag_list,
+        source_url=source_url,
+        filename=filename,
     )
-    await db.commit()
-
-    return ArtifactCreateResponse(
-        artifact_id=node_id,
-        title=body.title,
-        tags=body.tags,
-        is_active=True,
-        created_at=now,
-        error=None,
+    logger.info("Artifact created: %s (%s) source=%s", artifact.title, artifact.id, source)
+    return schemas.ArtifactResponse(
+        artifact_id=artifact.id,
+        title=artifact.title,
+        tags=artifact.tags,
+        is_active=artifact.is_active,
+        created_at=artifact.created_at,
     )
 
 
-@router.patch("/api/artifacts/{artifact_id}", response_model=ArtifactPatchResponse)
-async def patch_artifact(
+@router.patch("/artifacts/{artifact_id}", response_model=schemas.ArtifactResponse)
+async def update_artifact_active(
     artifact_id: str,
-    body: ArtifactPatchRequest,
-    db: aiosqlite.Connection = Depends(get_db),
-) -> ArtifactPatchResponse:
-    cursor = await db.execute(
-        "SELECT id, metadata_json FROM nodes WHERE id = ? AND layer_type = 'exploration'",
-        (artifact_id,),
-    )
-    row = await cursor.fetchone()
-    if row is None:
-        raise HTTPException(
-            status_code=404, detail=f"Artifact '{artifact_id}' not found."
-        )
-
-    meta = json.loads(row["metadata_json"] or "{}")
-    meta["is_active"] = body.active
-    await db.execute(
-        "UPDATE nodes SET metadata_json = ? WHERE id = ?",
-        (json.dumps(meta), artifact_id),
-    )
-    await db.commit()
-
-    return ArtifactPatchResponse(
-        artifact_id=artifact_id,
-        is_active=body.active,
-        error=None,
+    body: schemas.UpdateArtifactRequest,
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> schemas.ArtifactResponse:
+    """Toggle the is_active flag for triage."""
+    updated = await api_repo.update_artifact_active(conn, artifact_id, body.active)
+    if updated is None:
+        raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found.")
+    return schemas.ArtifactResponse(
+        artifact_id=updated.id,
+        title=updated.title,
+        tags=updated.tags,
+        is_active=updated.is_active,
+        created_at=updated.created_at,
     )
 
 
-@router.delete("/api/artifacts/{artifact_id}", response_model=ArtifactDeleteResponse)
+@router.delete("/artifacts/{artifact_id}", response_model=schemas.DeleteResponse)
 async def delete_artifact(
     artifact_id: str,
-    db: aiosqlite.Connection = Depends(get_db),
-) -> ArtifactDeleteResponse:
-    cursor = await db.execute(
-        "SELECT id FROM nodes WHERE id = ? AND layer_type = 'exploration'",
-        (artifact_id,),
-    )
-    if await cursor.fetchone() is None:
-        raise HTTPException(
-            status_code=404, detail=f"Artifact '{artifact_id}' not found."
-        )
-
-    await db.execute("DELETE FROM nodes WHERE id = ?", (artifact_id,))
-    await db.commit()
-
-    return ArtifactDeleteResponse(artifact_id=artifact_id, status="deleted", error=None)
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> schemas.DeleteResponse:
+    deleted = await api_repo.delete_artifact(conn, artifact_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found.")
+    logger.info("Artifact deleted: %s", artifact_id)
+    return schemas.DeleteResponse(id=artifact_id, status="deleted")
 
 
-@router.get("/api/artifacts/suggestions", response_model=ArtifactSuggestionsResponse)
+@router.get("/artifacts/suggestions", response_model=schemas.SuggestionsResponse)
 async def get_suggestions(
-    filename: str = Query(default=""),
-    content_preview: str = Query(default=""),
-) -> ArtifactSuggestionsResponse:
-    suggestions = _suggest_tags(filename, content_preview)
-    return ArtifactSuggestionsResponse(suggestions=suggestions, error=None)
+    filename: str = "",
+    content_preview: str = "",
+) -> schemas.SuggestionsResponse:
+    """Return regex-derived tag hints.  No LLM calls are made."""
+    return schemas.SuggestionsResponse(
+        suggestions=_derive_suggestions(filename, content_preview)
+    )

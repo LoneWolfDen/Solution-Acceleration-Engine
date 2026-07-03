@@ -1,127 +1,77 @@
-"""
-tests/api/conftest.py — Shared fixtures for API integration tests.
-
-Fixtures
---------
-app         — FastAPI instance wired to a fresh in-memory SQLite DB per test.
-client      — Synchronous TestClient wrapping the app (httpx transport).
-db_conn     — Direct aiosqlite connection to the same in-memory DB (for setup helpers).
-project_id  — A pre-inserted project row, available to every test that needs one.
-
-Design
-------
-- Each test gets its own isolated `:memory:` DB via create_app(":memory:").
-- The TestClient uses ``with`` context manager to trigger lifespan (startup/shutdown).
-- No LLM calls are made anywhere; pipeline background tasks are stubs.
-- The ``CONTEXTA_LLM_BACKEND`` env-var is NOT required by the API layer itself,
-  only by ContextaConfig (used by the TUI).  The API's create_app() catches
-  ConfigError and falls back to a default path, so tests pass without it.
-"""
+"""tests/api/conftest.py — Shared fixtures for FastAPI integration tests."""
 
 from __future__ import annotations
 
 import asyncio
-import uuid
-from typing import Generator
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
+import aiosqlite
 import pytest
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from contexta.api import create_app
-from contexta.api.config_store import AdminConfigStore
-
-
-# ── App / Client ──────────────────────────────────────────────────────────────
+from contexta.db.schema import run_migrations
 
 
-@pytest.fixture()
-def app():
-    """FastAPI app backed by a fresh in-memory SQLite DB."""
-    return create_app(db_path=":memory:")
+@pytest.fixture(scope="session")
+def event_loop():
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
-@pytest.fixture()
-def client(app) -> Generator[TestClient, None, None]:
-    """Synchronous TestClient that triggers lifespan startup/shutdown."""
-    with TestClient(app, raise_server_exceptions=True) as c:
-        yield c
+@pytest.fixture
+def test_app():
+    """TestClient backed by an isolated in-memory SQLite DB."""
+    async def _open_db():
+        conn = await aiosqlite.connect(":memory:")
+        conn.row_factory = aiosqlite.Row
+        await conn.execute("PRAGMA foreign_keys = ON")
+        await run_migrations(conn)
+        await conn.execute(
+            "INSERT INTO projects (id, name, global_tags) VALUES (?, ?, ?)",
+            ("proj-1", "Test Project", '["test"]'),
+        )
+        await conn.commit()
+        return conn
+
+    @asynccontextmanager
+    async def _lifespan(application: FastAPI) -> AsyncGenerator[None, None]:
+        application.state.db = await _open_db()
+        yield
+        await application.state.db.close()
+
+    from contexta.api.routers import admin, artifacts, projects, proposals, reviews, versions
+
+    fresh_app = FastAPI(lifespan=_lifespan)
+    fresh_app.add_middleware(
+        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+    )
+
+    @fresh_app.exception_handler(StarletteHTTPException)
+    async def _http_exc(request, exc):
+        return JSONResponse(status_code=exc.status_code, content={"error": str(exc.detail)})
+
+    @fresh_app.exception_handler(Exception)
+    async def _unhandled_exc(request, exc):
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+    fresh_app.get("/api/health")(lambda: {"status": "ok", "error": None})
+    fresh_app.include_router(projects.router, prefix="/api")
+    fresh_app.include_router(versions.router, prefix="/api")
+    fresh_app.include_router(artifacts.router, prefix="/api")
+    fresh_app.include_router(reviews.router, prefix="/api")
+    fresh_app.include_router(proposals.router, prefix="/api")
+    fresh_app.include_router(admin.router, prefix="/api")
+
+    with TestClient(fresh_app, raise_server_exceptions=False) as client:
+        yield client
 
 
-# ── Direct DB access (for test setup helpers) ─────────────────────────────────
-
-
-@pytest.fixture()
-def db_conn(app, client):
-    """
-    Return the live aiosqlite connection from app.state.db.
-
-    ``client`` fixture is listed as a dependency to ensure the lifespan has
-    already run (i.e. the DB is open and migrations applied).
-    """
-    return app.state.db
-
-
-# ── Pre-seeded data helpers ───────────────────────────────────────────────────
-
-
-def _run(coro):
-    """Run a coroutine in the current event loop (test process loop)."""
-    return asyncio.get_event_loop().run_until_complete(coro)
-
-
-@pytest.fixture()
-def project_id(db_conn) -> str:
-    """Insert a project and return its ID."""
-    from contexta.db import repositories as repo
-    row = _run(repo.create_project(db_conn, "Test Project", ["test"]))
-    return row.id
-
-
-@pytest.fixture()
-def version_id(db_conn, project_id) -> str:
-    """Insert a version under project_id and return its ID."""
-    from contexta.db import repositories as repo
-    row = _run(repo.create_version(db_conn, project_id, "v1.0"))
-    return row.id
-
-
-@pytest.fixture()
-def artifact_id(db_conn, project_id) -> str:
-    """Insert an exploration node (artifact) and return its ID."""
-    import json
-    from datetime import datetime, timezone
-    node_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    meta = {"tags": ["test-tag"], "is_active": True, "source": "paste"}
-    _run(db_conn.execute(
-        """
-        INSERT INTO nodes
-            (id, project_id, parent_id, layer_type, node_name,
-             metadata_json, content_markdown, created_at, version_tag, version_id)
-        VALUES (?, ?, NULL, 'exploration', ?, ?, ?, ?, NULL, NULL)
-        """,
-        (node_id, project_id, "Test Artifact", json.dumps(meta), "content", now),
-    ))
-    _run(db_conn.commit())
-    return node_id
-
-
-@pytest.fixture()
-def review_id(db_conn, project_id, version_id) -> str:
-    """Insert a synthesis node (review) under version_id and return its ID."""
-    import json
-    from datetime import datetime, timezone
-    node_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    meta = {"persona": "risk-analyst", "status": "complete"}
-    _run(db_conn.execute(
-        """
-        INSERT INTO nodes
-            (id, project_id, parent_id, layer_type, node_name,
-             metadata_json, content_markdown, created_at, version_tag, version_id)
-        VALUES (?, ?, NULL, 'synthesis', ?, ?, '', ?, NULL, ?)
-        """,
-        (node_id, project_id, "Review — test", json.dumps(meta), now, version_id),
-    ))
-    _run(db_conn.commit())
-    return node_id
+@pytest.fixture
+def project_id():
+    return "proj-1"

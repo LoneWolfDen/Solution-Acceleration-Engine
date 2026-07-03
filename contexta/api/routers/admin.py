@@ -1,122 +1,166 @@
 """
 contexta/api/routers/admin.py
 
-GET  /api/admin/health
-GET  /api/admin/config
-POST /api/admin/config
+GET  /api/admin/health   — provider connectivity status + last run
+GET  /api/admin/config   — current config (keys masked, never raw)
+POST /api/admin/config   — save one config field (key, threshold, ollama_url, etc.)
 """
 
 from __future__ import annotations
 
+import logging
+from typing import Optional
+
 import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException
 
-from ..config_store import AdminConfigStore
-from ..dependencies import get_config, get_db
-from ..schemas import (
-    AdminConfigRequest,
-    AdminConfigResponse,
-    AdminConfigSaveResponse,
-    AdminHealthResponse,
-    ProviderKeyStatuses,
-    ProviderStatuses,
+from contexta.api import repositories as api_repo
+from contexta.api import schemas
+from contexta.api.config_keys import (
+    KEY_GEMINI as _KEY_GEMINI,
+    KEY_GROQ as _KEY_GROQ,
+    KEY_MAX_ACTIVE_PROJECTS as _KEY_MAX_ACTIVE_PROJECTS,
+    KEY_OLLAMA_URL as _KEY_OLLAMA_URL,
+    KEY_OPENROUTER as _KEY_OPENROUTER,
+    KEY_THRESHOLD_CONSTRAINT as _KEY_THRESHOLD_CONSTRAINT,
+    KEY_THRESHOLD_DEPENDENCY as _KEY_THRESHOLD_DEPENDENCY,
+    KEY_THRESHOLD_RISK as _KEY_THRESHOLD_RISK,
+    PROVIDER_KEYS as _PROVIDER_KEYS,
 )
+from contexta.api.dependencies import get_db
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
-
-_SUPPORTED_PROVIDERS = ("groq", "openrouter", "gemini")
-_SUPPORTED_THRESHOLDS = ("risk", "constraint", "dependency")
+logger = logging.getLogger(__name__)
+router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-@router.get("/health", response_model=AdminHealthResponse)
-async def admin_health(
-    config: AdminConfigStore = Depends(get_config),
-) -> AdminHealthResponse:
-    return AdminHealthResponse(
-        last_run=config.last_run,
-        providers=ProviderStatuses(
-            groq=config.provider_connectivity_status("groq"),
-            openrouter=config.provider_connectivity_status("openrouter"),
-            gemini=config.provider_connectivity_status("gemini"),
-            ollama=config.provider_connectivity_status("ollama"),
+def _status(value: Optional[str]) -> str:
+    return "configured" if value else "not_set"
+
+
+def _key_status(value: Optional[str]) -> str:
+    return "set" if value else "not_set"
+
+
+@router.get("/health", response_model=schemas.AdminHealthResponse)
+async def get_health(
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> schemas.AdminHealthResponse:
+    """Return live provider status and the timestamp of the last completed review."""
+    config = await api_repo.get_all_config(conn)
+
+    # Last completed review timestamp
+    cursor = await conn.execute(
+        "SELECT updated_at FROM review_jobs WHERE status = 'complete' "
+        "ORDER BY updated_at DESC LIMIT 1"
+    )
+    row = await cursor.fetchone()
+    last_run: Optional[str] = row["updated_at"] if row else None
+
+    return schemas.AdminHealthResponse(
+        last_run=last_run,
+        providers=schemas.AdminProviders(
+            groq=_status(config.get(_KEY_GROQ)),
+            openrouter=_status(config.get(_KEY_OPENROUTER)),
+            gemini=_status(config.get(_KEY_GEMINI)),
+            ollama=_status(config.get(_KEY_OLLAMA_URL)),
         ),
-        error=None,
     )
 
 
-@router.get("/config", response_model=AdminConfigResponse)
-async def admin_config(
-    config: AdminConfigStore = Depends(get_config),
-) -> AdminConfigResponse:
-    return AdminConfigResponse(
-        providers=ProviderKeyStatuses(
-            groq=config.key_status("groq"),
-            openrouter=config.key_status("openrouter"),
-            gemini=config.key_status("gemini"),
+@router.get("/config", response_model=schemas.AdminConfigResponse)
+async def get_config(
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> schemas.AdminConfigResponse:
+    """Return current config.  API keys are returned as status strings, never raw values."""
+    config = await api_repo.get_all_config(conn)
+
+    def _float(key: str, default: float) -> float:
+        try:
+            return float(config[key]) if key in config else default
+        except (ValueError, TypeError):
+            return default
+
+    def _int(key: str, default: int) -> int:
+        try:
+            return int(config[key]) if key in config else default
+        except (ValueError, TypeError):
+            return default
+
+    return schemas.AdminConfigResponse(
+        providers=schemas.AdminProviders(
+            groq=_key_status(config.get(_KEY_GROQ)),
+            openrouter=_key_status(config.get(_KEY_OPENROUTER)),
+            gemini=_key_status(config.get(_KEY_GEMINI)),
+            ollama=_key_status(config.get(_KEY_OLLAMA_URL)),
         ),
-        ollama_url=config.ollama_url,
-        thresholds=dict(config.thresholds),
-        max_active_projects=config.max_active_projects,
-        error=None,
+        ollama_url=config.get(_KEY_OLLAMA_URL, ""),
+        thresholds=schemas.AdminThresholds(
+            risk=_float(_KEY_THRESHOLD_RISK, 0.75),
+            constraint=_float(_KEY_THRESHOLD_CONSTRAINT, 0.70),
+            dependency=_float(_KEY_THRESHOLD_DEPENDENCY, 0.80),
+        ),
+        max_active_projects=_int(_KEY_MAX_ACTIVE_PROJECTS, 5),
     )
 
 
-@router.post("/config", response_model=AdminConfigSaveResponse)
-async def update_admin_config(
-    body: AdminConfigRequest,
-    config: AdminConfigStore = Depends(get_config),
-) -> AdminConfigSaveResponse:
+@router.post("/config", response_model=schemas.AdminConfigUpdateResponse)
+async def update_config(
+    body: schemas.UpdateAdminConfigRequest,
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> schemas.AdminConfigUpdateResponse:
+    """Save one configuration field.  API keys are write-only; they are never returned."""
+    valid_fields = {"api_key", "threshold", "ollama_url", "max_active_projects"}
+    if body.field not in valid_fields:
+        raise HTTPException(
+            status_code=422,
+            detail=f"field must be one of {sorted(valid_fields)}.",
+        )
+
     if body.field == "api_key":
-        if not body.provider:
-            raise HTTPException(
-                status_code=422, detail="provider is required when field='api_key'."
-            )
-        if body.provider not in _SUPPORTED_PROVIDERS:
+        if not body.provider or body.provider not in _PROVIDER_KEYS:
             raise HTTPException(
                 status_code=422,
-                detail=f"provider must be one of {_SUPPORTED_PROVIDERS}.",
+                detail=f"provider must be one of {sorted(_PROVIDER_KEYS)}.",
             )
-        if body.key is None:
+        if not body.key:
             raise HTTPException(
-                status_code=422, detail="key is required when field='api_key'."
+                status_code=422, detail="key must not be empty when saving an API key."
             )
-        config.set_key(body.provider, body.key)
+        db_key = _PROVIDER_KEYS[body.provider]
+        await api_repo.set_config_value(conn, db_key, body.key)
+        logger.info("API key updated for provider: %s", body.provider)
 
     elif body.field == "threshold":
-        if not body.threshold_name:
+        valid_thresholds = {"risk", "constraint", "dependency"}
+        if not body.threshold_name or body.threshold_name not in valid_thresholds:
             raise HTTPException(
                 status_code=422,
-                detail="threshold_name is required when field='threshold'.",
-            )
-        if body.threshold_name not in _SUPPORTED_THRESHOLDS:
-            raise HTTPException(
-                status_code=422,
-                detail=f"threshold_name must be one of {_SUPPORTED_THRESHOLDS}.",
+                detail=f"threshold_name must be one of {sorted(valid_thresholds)}.",
             )
         if body.threshold_value is None:
             raise HTTPException(
-                status_code=422,
-                detail="threshold_value is required when field='threshold'.",
+                status_code=422, detail="threshold_value is required."
             )
-        if not (0.0 <= body.threshold_value <= 1.0):
-            raise HTTPException(
-                status_code=422,
-                detail="threshold_value must be between 0.0 and 1.0.",
-            )
-        config.set_threshold(body.threshold_name, body.threshold_value)
+        db_key = f"threshold_{body.threshold_name}"
+        await api_repo.set_config_value(conn, db_key, str(body.threshold_value))
+        logger.info("Threshold updated: %s = %s", body.threshold_name, body.threshold_value)
 
     elif body.field == "ollama_url":
         if not body.ollama_url:
             raise HTTPException(
-                status_code=422,
-                detail="ollama_url is required when field='ollama_url'.",
+                status_code=422, detail="ollama_url must not be empty."
             )
-        config.ollama_url = body.ollama_url
+        await api_repo.set_config_value(conn, _KEY_OLLAMA_URL, body.ollama_url)
+        logger.info("Ollama URL updated: %s", body.ollama_url)
 
-    else:
-        raise HTTPException(
-            status_code=422,
-            detail="field must be one of 'api_key', 'threshold', 'ollama_url'.",
+    elif body.field == "max_active_projects":
+        if body.max_active_projects is None or body.max_active_projects < 1:
+            raise HTTPException(
+                status_code=422, detail="max_active_projects must be >= 1."
+            )
+        await api_repo.set_config_value(
+            conn, _KEY_MAX_ACTIVE_PROJECTS, str(body.max_active_projects)
         )
+        logger.info("max_active_projects updated: %d", body.max_active_projects)
 
-    return AdminConfigSaveResponse(field=body.field, status="saved", error=None)
+    return schemas.AdminConfigUpdateResponse(field=body.field, status="saved")
