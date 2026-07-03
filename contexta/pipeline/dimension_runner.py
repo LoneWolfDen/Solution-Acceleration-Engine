@@ -264,6 +264,19 @@ def make_dimension_runner(
         Logical context key stored in KnowledgeContext.  Typically the current
         exploration node id or session identifier.
 
+    Parameters
+    ----------
+    config:
+        LiteLLM model configuration.
+    builder:
+        Prompt builder instance.
+    registry:
+        Artifact registry used to build the context string.
+    max_retries:
+        Passed directly to ``call_llm()`` — maximum retry attempts on 429.
+    retry_max_wait_seconds:
+        Hard ceiling on any single backoff wait, passed to ``call_llm()``.
+
     Raises
     ------
     DimensionValidationError

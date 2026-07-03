@@ -61,6 +61,13 @@ class ContextaConfig(BaseSettings):
     # ── Rate limiting ─────────────────────────────────────────────────────────
     llm_request_delay_seconds: float = 2.5   # CONTEXTA_LLM_REQUEST_DELAY_SECONDS
 
+    # ── Retry / backoff ───────────────────────────────────────────────────────
+    # Maximum number of retry attempts on RateLimitError (429) before giving up.
+    llm_max_retries: int = 4                 # CONTEXTA_LLM_MAX_RETRIES
+    # Hard ceiling on any single wait period (seconds).  Groq free tier asks
+    # for ~60s; 120s gives headroom for clock skew and burst bursts.
+    llm_retry_max_wait_seconds: float = 120.0  # CONTEXTA_LLM_RETRY_MAX_WAIT_SECONDS
+
     @field_validator("llm_backend")
     @classmethod
     def validate_backend(cls, v: str) -> str:

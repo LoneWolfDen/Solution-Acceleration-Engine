@@ -15,8 +15,10 @@ verified by Property 10 (Temperature-Zero LLM Call Invariant).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -128,6 +130,115 @@ def _normalise_json_content(raw: str, model: str) -> str:
     return raw
 
 
+# ── Retry helpers ─────────────────────────────────────────────────────────────
+
+#: Regex that extracts the float number of seconds from Groq's error message,
+#: e.g. "Please try again in 59.02s."
+_RETRY_AFTER_RE = re.compile(r"try again in (\d+(?:\.\d+)?)s", re.IGNORECASE)
+
+#: Base wait (seconds) used when no retry-after hint is present in the error.
+_BACKOFF_BASE_SECONDS: float = 5.0
+
+
+def _parse_retry_after(exc: Exception) -> Optional[float]:
+    """Extract the provider-recommended wait time (seconds) from a rate-limit error.
+
+    Groq embeds the wait duration in the error message:
+        "Please try again in 59.02s."
+
+    Returns the parsed float, or ``None`` if no hint is found.
+    """
+    match = _RETRY_AFTER_RE.search(str(exc))
+    if match:
+        return float(match.group(1))
+    return None
+
+
+async def _call_llm_with_retry(
+    kwargs: dict,
+    model: str,
+    max_retries: int,
+    max_wait_seconds: float,
+) -> Any:
+    """Call ``litellm.acompletion`` with exponential backoff on ``RateLimitError``.
+
+    Strategy
+    --------
+    1. On a ``RateLimitError`` (HTTP 429), parse the provider's retry-after hint
+       from the error message.
+    2. If a hint is found, wait exactly that long (capped at ``max_wait_seconds``).
+    3. If no hint, use exponential backoff: ``_BACKOFF_BASE_SECONDS * 2 ** attempt``,
+       also capped at ``max_wait_seconds``.
+    4. After ``max_retries`` failed attempts, re-raise the last error as
+       ``LLMCallError``.
+
+    All other exception types are re-raised immediately without retry.
+
+    Parameters
+    ----------
+    kwargs:
+        Full keyword argument dict for ``litellm.acompletion``.
+    model:
+        Model identifier string — used only in log messages.
+    max_retries:
+        Maximum number of retry attempts (not counting the first call).
+    max_wait_seconds:
+        Hard ceiling applied to every computed wait duration.
+
+    Returns
+    -------
+    Any
+        The raw ``litellm`` response object on success.
+
+    Raises
+    ------
+    LLMCallError
+        After exhausting all retries, or immediately on non-rate-limit errors.
+    """
+    last_exc: Exception | None = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return await litellm.acompletion(**kwargs)
+        except litellm.RateLimitError as exc:
+            last_exc = exc
+            if attempt == max_retries:
+                break  # exhausted — fall through to raise
+
+            retry_after = _parse_retry_after(exc)
+            if retry_after is not None:
+                wait = min(retry_after + 1.0, max_wait_seconds)  # +1s safety margin
+            else:
+                wait = min(_BACKOFF_BASE_SECONDS * (2 ** attempt), max_wait_seconds)
+
+            logger.warning(
+                "Rate limit on model %r (attempt %d/%d) — waiting %.1fs before retry.",
+                model,
+                attempt + 1,
+                max_retries,
+                wait,
+            )
+            await asyncio.sleep(wait)
+
+        except Exception as exc:
+            # Non-rate-limit errors are not retried.
+            logger.exception("LLM call failed — model=%r error=%s", model, exc)
+            raise LLMCallError(
+                f"LiteLLM call failed for model {model!r}: {exc}"
+            ) from exc
+
+    # All retries exhausted on RateLimitError.
+    logger.error(
+        "Model %r rate-limited after %d attempt(s) — giving up.",
+        model,
+        max_retries + 1,
+    )
+    raise LLMCallError(
+        f"Rate limit exceeded for model {model!r} after {max_retries + 1} attempt(s): "
+        f"{last_exc}"
+    ) from last_exc
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 #: Temperature value enforced on every LLM call — never changes.
@@ -142,8 +253,10 @@ async def call_llm(
     system: str,
     user: str,
     max_tokens: int = 4096,
+    max_retries: int = 4,
+    retry_max_wait_seconds: float = 120.0,
 ) -> LLMResponse:
-    """Make a single LiteLLM completion call in Temperature-Zero Mode.
+    """Make a LiteLLM completion call in Temperature-Zero Mode with retry.
 
     Parameters
     ----------
@@ -155,6 +268,11 @@ async def call_llm(
         User-role message — typically the artifact context block.
     max_tokens:
         Upper bound on the completion length.
+    max_retries:
+        Maximum retry attempts on ``RateLimitError`` (HTTP 429).
+        Defaults to 4.  Pass 0 to disable retry.
+    retry_max_wait_seconds:
+        Hard ceiling on any single backoff wait.  Defaults to 120s.
 
     Returns
     -------
@@ -164,7 +282,8 @@ async def call_llm(
     Raises
     ------
     LLMCallError
-        On any network failure, non-200 status, or unexpected response shape.
+        After exhausting retries on rate-limit errors, or immediately on any
+        other network / response-shape failure.
     """
     kwargs: dict = dict(
         model=config.model,
@@ -189,11 +308,12 @@ async def call_llm(
         len(user),
     )
 
-    try:
-        response = await litellm.acompletion(**kwargs)
-    except Exception as exc:
-        logger.exception("LLM call failed — model=%r error=%s", config.model, exc)
-        raise LLMCallError(f"LiteLLM call failed for model {config.model!r}: {exc}") from exc
+    response = await _call_llm_with_retry(
+        kwargs,
+        model=config.model,
+        max_retries=max_retries,
+        max_wait_seconds=retry_max_wait_seconds,
+    )
 
     try:
         content: str = response.choices[0].message.content
