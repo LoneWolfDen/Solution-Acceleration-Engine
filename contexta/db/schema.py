@@ -24,7 +24,9 @@ logger = logging.getLogger(__name__)
 # Bump this integer whenever new DDL is added to DDL_STATEMENTS.
 # v1 → v2: Added ``versions`` table and ``version_id`` FK column on ``nodes``.
 # v2 → v3: Added ``intelligence_layer`` table for Sprint 6 PromptOptimizer.
-SCHEMA_VERSION = 3
+# v3 → v4: Added ``artifacts`` table, ``version_artifacts`` join table,
+#           ``reviews`` table (API review tracking), and ``proposals`` table.
+SCHEMA_VERSION = 4
 
 # All DDL statements executed in order during migration.
 # CREATE TABLE IF NOT EXISTS ensures idempotency on re-runs.
@@ -119,6 +121,80 @@ DDL_STATEMENTS: list[str] = [
         created_at     TEXT NOT NULL
     )
     """,
+
+    # ── Artifacts (v4) ────────────────────────────────────────────────────────
+    # Represents ingested source documents (files, paste, URL) within a project.
+    # is_active controls whether this artifact is included in the next version.
+    """
+    CREATE TABLE IF NOT EXISTS artifacts (
+        id         TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id),
+        title      TEXT NOT NULL,
+        source     TEXT NOT NULL DEFAULT 'paste',
+        content    TEXT NOT NULL DEFAULT '',
+        url        TEXT,
+        tags       TEXT NOT NULL DEFAULT '[]',
+        is_active  INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL
+    )
+    """,
+
+    # ── Version-Artifact join (v4) ────────────────────────────────────────────
+    # Many-to-many: one version can pin multiple artifacts; one artifact can
+    # belong to multiple versions.
+    """
+    CREATE TABLE IF NOT EXISTS version_artifacts (
+        version_id  TEXT NOT NULL REFERENCES versions(id),
+        artifact_id TEXT NOT NULL REFERENCES artifacts(id),
+        PRIMARY KEY (version_id, artifact_id)
+    )
+    """,
+
+    # ── Reviews (v4) ─────────────────────────────────────────────────────────
+    # API-layer review tracking.  Each row represents one async pipeline run
+    # triggered via POST /api/reviews.  The corresponding LLM outputs land in
+    # the ``nodes`` table; this table tracks scheduling metadata and status.
+    #
+    # status values: 'queued' | 'running' | 'complete' | 'failed'
+    """
+    CREATE TABLE IF NOT EXISTS reviews (
+        id               TEXT PRIMARY KEY,
+        version_id       TEXT NOT NULL REFERENCES versions(id),
+        node_id          TEXT REFERENCES nodes(id),
+        persona_roles    TEXT NOT NULL DEFAULT '[]',
+        context          TEXT NOT NULL DEFAULT '',
+        status           TEXT NOT NULL DEFAULT 'queued',
+        progress_message TEXT,
+        run_date         TEXT NOT NULL,
+        error_message    TEXT
+    )
+    """,
+
+    # ── Proposals (v4) ────────────────────────────────────────────────────────
+    # Tracks async proposal-generation jobs triggered via POST /api/proposals.
+    # status values: 'queued' | 'running' | 'complete' | 'failed'
+    """
+    CREATE TABLE IF NOT EXISTS proposals (
+        id               TEXT PRIMARY KEY,
+        review_id        TEXT NOT NULL REFERENCES reviews(id),
+        node_id          TEXT REFERENCES nodes(id),
+        status           TEXT NOT NULL DEFAULT 'queued',
+        progress_message TEXT,
+        created_at       TEXT NOT NULL,
+        error_message    TEXT
+    )
+    """,
+
+    # ── LLM provider config (v4) ──────────────────────────────────────────────
+    # Stores encrypted/masked API keys and threshold settings.
+    # One row per setting; key is the setting name.
+    """
+    CREATE TABLE IF NOT EXISTS llm_config (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """,
 ]
 
 
@@ -167,6 +243,12 @@ async def run_migrations(conn: "aiosqlite.Connection") -> None:
         # intelligence_layer is an entirely new table — no column alterations
         # are needed on existing tables.  The CREATE TABLE IF NOT EXISTS in
         # step 1 already handles both fresh installs and upgrades idempotently.
+        # Nothing extra to do here.
+
+        # ── v3 → v4 ──────────────────────────────────────────────────────────
+        # artifacts, version_artifacts, reviews, proposals, llm_config tables
+        # are all new — CREATE TABLE IF NOT EXISTS in step 1 handles both
+        # fresh installs and upgrades idempotently.
         # Nothing extra to do here.
 
         # ── Record new schema version ─────────────────────────────────────────

@@ -11,18 +11,80 @@ Every call to ``call_llm()`` unconditionally passes:
 These two overrides are applied inside ``call_llm()`` itself; callers have no
 mechanism to override them.  This satisfies Requirement 5.2 / 6.2 and is
 verified by Property 10 (Temperature-Zero LLM Call Invariant).
+
+Rate-limit handling
+-------------------
+``_call_llm_with_retry()`` wraps the raw litellm call with:
+  - Up to ``MAX_RETRY_ATTEMPTS`` retries on ``RateLimitError``.
+  - Exponential back-off with jitter drawn from ``_jitter()``.
+  - A global ``asyncio.Semaphore`` (``_LLM_SEMAPHORE``) that caps the number of
+    concurrent in-flight LLM requests to ``MAX_CONCURRENT_LLM_REQUESTS``.  This
+    prevents burst parallelism (e.g. 12 simultaneous dimension calls) from
+    immediately exhausting the provider's TPM ceiling.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import random
 from dataclasses import dataclass
 from typing import Any, Optional
 
 import litellm
 
 logger = logging.getLogger(__name__)
+
+
+# ── Concurrency cap ───────────────────────────────────────────────────────────
+
+#: Maximum number of LLM calls allowed in-flight at the same time.
+#: Set to 1 so that sequential dimension tasks never overlap;
+#: increase to 2-3 if the provider supports higher parallel throughput.
+MAX_CONCURRENT_LLM_REQUESTS: int = 1
+
+#: The semaphore instance.  Created lazily on first use so it is always bound
+#: to the running event loop (avoids "attached to a different loop" errors in
+#: pytest where a new loop is created per test).
+_LLM_SEMAPHORE: Optional[asyncio.Semaphore] = None
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    """Return the module-level semaphore, creating it on the current loop if needed."""
+    global _LLM_SEMAPHORE
+    if _LLM_SEMAPHORE is None:
+        _LLM_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_LLM_REQUESTS)
+    return _LLM_SEMAPHORE
+
+
+def reset_semaphore() -> None:
+    """Re-create the semaphore.  Call this in test teardown to avoid loop contamination."""
+    global _LLM_SEMAPHORE
+    _LLM_SEMAPHORE = None
+
+
+# ── Retry parameters ──────────────────────────────────────────────────────────
+
+#: Total attempts including the first — so ``MAX_RETRY_ATTEMPTS=5`` means 1
+#: initial attempt + 4 retries.
+MAX_RETRY_ATTEMPTS: int = 5
+
+#: Base delay in seconds for the exponential back-off.
+_RETRY_BASE_DELAY: float = 2.0
+
+#: Maximum delay cap in seconds — prevents unbounded waits.
+_RETRY_MAX_DELAY: float = 60.0
+
+
+def _backoff_delay(attempt: int) -> float:
+    """Compute exponential back-off with ±20 % uniform jitter.
+
+    ``attempt`` is 0-indexed (0 = first retry, 1 = second, …).
+    """
+    base = min(_RETRY_BASE_DELAY * (2 ** attempt), _RETRY_MAX_DELAY)
+    jitter = base * 0.2 * (random.random() * 2 - 1)  # ±20 %
+    return max(0.1, base + jitter)
 
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
@@ -71,26 +133,6 @@ def _normalise_json_content(raw: str, model: str) -> str:
     This pre-processor ensures the ``LLMResponse.content`` field always
     contains a plain JSON *object* so that downstream
     ``ReviewNodePayload.model_validate_json()`` never receives a list.
-
-    Parameters
-    ----------
-    raw:
-        Raw JSON string returned by the LLM completion.
-    model:
-        LiteLLM model identifier — used only in log / error messages.
-
-    Returns
-    -------
-    str
-        JSON string whose top-level value is guaranteed to be a dict.
-
-    Raises
-    ------
-    LLMCallError
-        * ``raw`` is not valid JSON.
-        * ``raw`` is a JSON array that is empty.
-        * The first element of the array is not a dict.
-        * ``raw`` is valid JSON but neither a dict nor a list.
     """
     try:
         parsed: Any = json.loads(raw)
@@ -128,6 +170,70 @@ def _normalise_json_content(raw: str, model: str) -> str:
     return raw
 
 
+# ── Internal retry wrapper ────────────────────────────────────────────────────
+
+
+async def _call_llm_with_retry(**kwargs: Any) -> Any:
+    """Call ``litellm.acompletion`` with retry on ``RateLimitError``.
+
+    Wraps the call in the module-level semaphore so at most
+    ``MAX_CONCURRENT_LLM_REQUESTS`` calls are in-flight simultaneously.
+
+    On ``RateLimitError`` the function sleeps for an exponentially-increasing
+    delay then retries.  All other exceptions are re-raised immediately after
+    the first failure.
+
+    Parameters
+    ----------
+    **kwargs:
+        Passed directly to ``litellm.acompletion``.  Must include ``model``.
+
+    Returns
+    -------
+    Any
+        The raw litellm response object.
+
+    Raises
+    ------
+    LLMCallError
+        After ``MAX_RETRY_ATTEMPTS`` failed attempts due to rate limiting, or
+        immediately on any non-rate-limit exception.
+    """
+    semaphore = _get_semaphore()
+    last_exc: Optional[Exception] = None
+
+    # Extract model name for logging (it lives inside kwargs as a keyword arg).
+    model_name: str = kwargs.get("model", "<unknown>")
+
+    for attempt in range(MAX_RETRY_ATTEMPTS):
+        if attempt > 0:
+            delay = _backoff_delay(attempt - 1)
+            logger.warning(
+                "Rate limit on model %r (attempt %d/%d) — waiting %.1fs before retry.",
+                model_name,
+                attempt,
+                MAX_RETRY_ATTEMPTS,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
+        try:
+            async with semaphore:
+                return await litellm.acompletion(**kwargs)
+        except litellm.RateLimitError as exc:
+            last_exc = exc
+            continue
+        except Exception as exc:
+            raise LLMCallError(
+                f"LiteLLM call failed for model {model_name!r}: {exc}"
+            ) from exc
+
+    raise LLMCallError(
+        f"Rate limit exceeded for model {model_name!r} after {MAX_RETRY_ATTEMPTS} attempt(s): "
+        f"{last_exc}"
+    ) from last_exc
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 #: Temperature value enforced on every LLM call — never changes.
@@ -144,6 +250,10 @@ async def call_llm(
     max_tokens: int = 4096,
 ) -> LLMResponse:
     """Make a single LiteLLM completion call in Temperature-Zero Mode.
+
+    Automatically retries on ``RateLimitError`` (via ``_call_llm_with_retry``)
+    and respects the global concurrency semaphore so parallel callers never
+    burst past the provider's TPM ceiling simultaneously.
 
     Parameters
     ----------
@@ -164,7 +274,8 @@ async def call_llm(
     Raises
     ------
     LLMCallError
-        On any network failure, non-200 status, or unexpected response shape.
+        On any network failure, non-200 status, or unexpected response shape,
+        or after all retry attempts are exhausted for rate-limit errors.
     """
     kwargs: dict = dict(
         model=config.model,
@@ -181,10 +292,7 @@ async def call_llm(
     if config.base_url is not None:
         kwargs["base_url"] = config.base_url
 
-    try:
-        response = await litellm.acompletion(**kwargs)
-    except Exception as exc:
-        raise LLMCallError(f"LiteLLM call failed for model {config.model!r}: {exc}") from exc
+    response = await _call_llm_with_retry(**kwargs)
 
     try:
         content: str = response.choices[0].message.content
@@ -204,12 +312,7 @@ async def call_llm(
 
 
 def validate_backend(backend: str) -> bool:
-    """Return ``True`` if LiteLLM recognises *backend* as a valid provider string.
-
-    Uses ``litellm.get_llm_provider()`` internally; returns ``False`` (rather
-    than propagating) on any exception so callers can treat this as a simple
-    boolean guard.
-    """
+    """Return ``True`` if LiteLLM recognises *backend* as a valid provider string."""
     try:
         litellm.get_llm_provider(backend)
         return True
