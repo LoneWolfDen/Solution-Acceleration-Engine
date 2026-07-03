@@ -8,12 +8,24 @@ version = "0.1.0"
 description = "Project Contexta — deterministic solution validation pipeline"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+    # TUI
     "textual>=0.47.0",
+    # Core models + settings
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
+    # Database
     "aiosqlite>=0.19.0",
+    # LLM
     "litellm>=1.20.0",
+    # MCP
     "mcp>=1.0.0",
+    # API layer (Milestone 1)
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    # HTTP client used by Reflex state and tests (Milestone 2 / 5)
+    "httpx>=0.27.0",
+    # Reflex full-stack UI (Milestone 2)
+    "reflex>=0.5.0",
 ]
 
 [project.optional-dependencies]
@@ -42,3 +54,11 @@ omit = ["contexta/__main__.py", "contexta/tui/*"]
 [tool.coverage.report]
 show_missing = true
 fail_under = 90
+
+# ── Reflex configuration ──────────────────────────────────────────────────────
+# app_name must match the Python module in web/web.py (i.e. the rx.App variable).
+# backend_port is the FastAPI / Reflex backend; the frontend dev server uses the
+# default frontend_port (3000). In production the static build is served at 8000.
+[tool.reflex]
+app_name = "web"
+backend_port = 8001
