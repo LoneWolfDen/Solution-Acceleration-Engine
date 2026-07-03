@@ -18,12 +18,21 @@ Design contracts
 3. **Arbitrator parity** — ``build_arbitrator_prompt()`` carries the same
    CRITICAL OUTPUT INSTRUCTIONS block to guarantee consistent parsing
    behaviour across both pipeline layers.
+
+4. **Contextual Constraints injection** — both ``build_dimension_prompt()``
+   and ``build_arbitrator_prompt()`` accept an optional ``observations`` list.
+   When provided, a CONTEXTUAL CONSTRAINTS block is appended to the system
+   prompt so the LLM applies prior user interventions as learned guidance.
 """
 
 from __future__ import annotations
+from typing import List, Optional, TYPE_CHECKING
 
 from ..db.models import BlueprintRow
 from ..models.enums import ReviewDimensionEnum
+
+if TYPE_CHECKING:
+    from ..db.models import ObservationRow
 
 # ── System prompt template ────────────────────────────────────────────────────
 
@@ -84,6 +93,45 @@ CRITICAL OUTPUT INSTRUCTIONS:
 of objects, each with keys: "dimension_a", "dimension_b", "description".
 """
 
+# ── Contextual Constraints block ──────────────────────────────────────────────
+
+_CONSTRAINTS_HEADER = """
+CONTEXTUAL CONSTRAINTS (from Knowledge Memory):
+The following amendments were applied by users in prior analyses. \
+Treat them as learned guidance and incorporate them into your output:
+"""
+
+
+def _build_constraints_block(observations: List["ObservationRow"]) -> str:
+    """Return a formatted CONTEXTUAL CONSTRAINTS section from observations.
+
+    Returns an empty string when the list is empty so callers can safely
+    concatenate without producing stray whitespace.
+
+    Parameters
+    ----------
+    observations:
+        ObservationRow objects retrieved from KnowledgeMemory for the current
+        pipeline context.  Ordered newest-first by the repository layer.
+
+    Returns
+    -------
+    str
+        Multi-line constraints block, or ``""`` if observations is empty.
+    """
+    if not observations:
+        return ""
+
+    lines: List[str] = [_CONSTRAINTS_HEADER]
+    for i, obs in enumerate(observations, start=1):
+        lines.append(
+            f"{i}. [Dimension: {obs.dimension} | Phase: {obs.phase}]\n"
+            f"   Original: {obs.base_value}\n"
+            f"   Amendment: {obs.amended_value}\n"
+            f"   Rationale: {obs.rationale}"
+        )
+    return "\n".join(lines)
+
 
 # ── PromptBuilder ─────────────────────────────────────────────────────────────
 
@@ -107,6 +155,7 @@ class PromptBuilder:
         self,
         dimension: ReviewDimensionEnum,
         artifact_context: str,
+        observations: Optional[List["ObservationRow"]] = None,
     ) -> tuple[str, str]:
         """Return ``(system_prompt, user_prompt)`` for a single dimension review.
 
@@ -115,6 +164,11 @@ class PromptBuilder:
         - The full ``master_prompt_text`` from the active blueprint
         - The CRITICAL OUTPUT INSTRUCTIONS block (raw JSON, no fences)
         - A concrete example of the expected ``ReviewNodePayload`` structure
+
+        When *observations* is non-empty a CONTEXTUAL CONSTRAINTS block is
+        appended so the LLM incorporates prior user interventions as learned
+        guidance.  This is the primary mechanism by which the engine learns
+        from manual corrections across runs.
 
         The user prompt contains all ingested artifact content formatted as a
         labelled block so the model has grounded, citable source material.
@@ -126,6 +180,9 @@ class PromptBuilder:
         artifact_context:
             Concatenated artifact content produced by
             ``ArtifactRegistry.build_context_string()``.
+        observations:
+            Optional list of ``ObservationRow`` objects from KnowledgeMemory.
+            Injected as Contextual Constraints when provided and non-empty.
 
         Returns
         -------
@@ -136,23 +193,32 @@ class PromptBuilder:
             dimension=dimension.value,
             master_prompt_text=self._blueprint.master_prompt_text,
         )
+        constraints = _build_constraints_block(observations or [])
+        if constraints:
+            system = system + constraints
         user = f"PROPOSAL ARTIFACTS:\n\n{artifact_context}"
         return system, user
 
     def build_arbitrator_prompt(
         self,
         payloads: list[str],
+        observations: Optional[List["ObservationRow"]] = None,
     ) -> tuple[str, str]:
         """Return ``(system_prompt, user_prompt)`` for the Layer 2 Arbitrator.
 
         The system prompt carries the same CRITICAL OUTPUT INSTRUCTIONS block
         as dimension prompts, enforcing raw JSON output for parsing stability.
 
+        When *observations* is non-empty a CONTEXTUAL CONSTRAINTS block is
+        appended to guide contradiction detection with prior user feedback.
+
         Parameters
         ----------
         payloads:
             List of ``ReviewNodePayload.model_dump_json()`` strings — one per
             completed dimension review (exactly 12 expected by the Arbitrator).
+        observations:
+            Optional list of ``ObservationRow`` objects from KnowledgeMemory.
 
         Returns
         -------
@@ -160,6 +226,9 @@ class PromptBuilder:
             ``(system_prompt, user_prompt)``
         """
         system = ARBITRATOR_SYSTEM_TEMPLATE
+        constraints = _build_constraints_block(observations or [])
+        if constraints:
+            system = system + constraints
         user = "\n\n".join(f"--- {i + 1} ---\n{p}" for i, p in enumerate(payloads))
         return system, user
 
@@ -213,17 +282,25 @@ _RECONCILIATION_SCHEMA_INLINE = """\
 }"""
 
 
-def build_synthesis_prompt(findings: list) -> tuple[str, str]:
+def build_synthesis_prompt(
+    findings: list,
+    observations: Optional[List["ObservationRow"]] = None,
+) -> tuple[str, str]:
     """Return ``(system_prompt, user_prompt)`` for the Layer 2 synthesis call.
 
     Formats all ``IssueFinding`` objects into a numbered context block so the
     model has grounded, citable source material to reason against.
+
+    When *observations* is non-empty a CONTEXTUAL CONSTRAINTS block is appended
+    to the system prompt so prior user interventions guide the synthesis.
 
     Parameters
     ----------
     findings:
         List of ``IssueFinding`` objects aggregated across all 12 dimensions.
         An empty list is accepted — the model will produce a minimal report.
+    observations:
+        Optional list of ``ObservationRow`` objects from KnowledgeMemory.
 
     Returns
     -------
@@ -233,6 +310,9 @@ def build_synthesis_prompt(findings: list) -> tuple[str, str]:
     system = LAYER2_SYNTHESIS_SYSTEM_TEMPLATE.format(
         schema_json=_RECONCILIATION_SCHEMA_INLINE
     )
+    constraints = _build_constraints_block(observations or [])
+    if constraints:
+        system = system + constraints
 
     if not findings:
         user = (
@@ -260,4 +340,128 @@ def build_synthesis_prompt(findings: list) -> tuple[str, str]:
         )
 
     user = "LAYER 1 FINDINGS:\n\n" + "\n\n".join(lines)
+    return system, user
+
+
+
+# ── Proposal prompt templates ─────────────────────────────────────────────────
+
+PROPOSAL_SYSTEM_TEMPLATE = """\
+You are a Project Proposal Synthesis AI. Your task is to generate a concise,
+data-backed project proposal grounded entirely in the provided review findings.
+
+CONFIDENCE MATRIX (Layer 1 dimension scores):
+{confidence_matrix_text}
+
+{erd_directive}
+
+CONCISENESS CONSTRAINT:
+Your output must be project-specific. Include only relevant industry knowledge
+that is directly applicable to the current project context. Do not include
+generic descriptions of SDLC or ITIL phases unless they directly explain a
+risk or mitigation specific to the provided artifacts. Every paragraph of your
+proposal MUST include at least one [ArtifactID:SectionID] traceability
+reference linking your statement to the source material.
+
+OUTPUT FORMAT:
+Respond with a single raw JSON object (no markdown fences) conforming to:
+{schema_json}
+"""
+
+_ERD_DIRECTIVE_TEMPLATE = """\
+MANDATORY EXECUTIVE RISK DISCLOSURE:
+The following dimensions have scored RED. You MUST generate an
+"Executive Risk Disclosure" section as the FIRST section of your proposal.
+Each RED dimension MUST reference specific [ArtifactID:SectionID] citations
+from the source material.
+
+RED dimensions requiring disclosure:
+{red_dimension_list}
+"""
+
+_PROPOSAL_OUTPUT_SCHEMA = """\
+{
+  "proposal_text": "<Markdown proposal — every paragraph contains [ArtifactID:SectionID]>",
+  "executive_risk_disclosure": {
+    "items": [
+      {
+        "dimension": "<ReviewDimensionEnum value>",
+        "confidence": "RED",
+        "summary": "<risk summary>",
+        "citation_refs": ["[ArtifactID:SectionID]"]
+      }
+    ],
+    "directive": "<overall risk directive>"
+  },
+  "diagram_metadata": {
+    "<diagram_id>": {
+      "diagram_id": "<id>",
+      "diagram_type": "<architecture|sequence|deployment>",
+      "title": "<title>",
+      "description": "<description>",
+      "drawio_xml": "<draw.io XML>",
+      "related_dimensions": ["<dimension name>"]
+    }
+  },
+  "download_links": {
+    "<label>": "<relative/path/to/file>"
+  }
+}"""
+
+
+def build_proposal_prompt(
+    confidence_matrix: "ConfidenceMatrix",  # type: ignore[name-defined]
+    artifact_context: str,
+    arbitrator_summary: Optional[str] = None,
+) -> tuple[str, str]:
+    """Return ``(system_prompt, user_prompt)`` for the ProposalEngine LLM call.
+
+    Injects the full ``ConfidenceMatrix`` into the system prompt so the model
+    can reason about per-dimension confidence levels.  When any dimension is
+    RED, a mandatory Executive Risk Disclosure directive is added.
+
+    Parameters
+    ----------
+    confidence_matrix:
+        Built by ``ConfidenceEngine.build_matrix()`` from Layer 1 payloads.
+    artifact_context:
+        Concatenated artifact content produced by
+        ``ArtifactRegistry.build_context_string()``.
+    arbitrator_summary:
+        Optional summary from the Layer 2 arbitrator to provide cross-dimension
+        conflict context.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(system_prompt, user_prompt)``
+    """
+    # Build confidence matrix text block
+    matrix_lines = []
+    for dim, conf in confidence_matrix.scores.items():
+        matrix_lines.append(f"  {dim.value}: {conf.value}")
+    confidence_matrix_text = "\n".join(matrix_lines) if matrix_lines else "  (no scores)"
+
+    # Build ERD directive if any RED dimensions exist
+    if confidence_matrix.has_red:
+        red_list_lines = []
+        for dim in confidence_matrix.red_dimensions:
+            red_list_lines.append(f"  - {dim.value} [RED]")
+        erd_directive = _ERD_DIRECTIVE_TEMPLATE.format(
+            red_dimension_list="\n".join(red_list_lines)
+        )
+    else:
+        erd_directive = ""
+
+    system = PROPOSAL_SYSTEM_TEMPLATE.format(
+        confidence_matrix_text=confidence_matrix_text,
+        erd_directive=erd_directive,
+        schema_json=_PROPOSAL_OUTPUT_SCHEMA,
+    )
+
+    user_parts = ["PROPOSAL ARTIFACTS:\n\n" + artifact_context]
+    if arbitrator_summary:
+        user_parts.append(f"\nARBITRATOR SUMMARY:\n\n{arbitrator_summary}")
+    user = "\n".join(user_parts)
+
     return system, user
