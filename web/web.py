@@ -8,6 +8,7 @@ Routes:
 
 import reflex as rx
 
+from contexta.api import app as fastapi_app
 from web.state import AppState
 from web.components.sidebar import sidebar
 from web.components.content_pane import content_pane
