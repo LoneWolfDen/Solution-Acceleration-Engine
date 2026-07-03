@@ -34,4 +34,5 @@ config = rx.Config(
     api_url=_api_url,
     frontend_packages=[],
     db_url=None,
+    vite_allowed_hosts=True,
 )
