@@ -19,7 +19,9 @@ RUN pip install --no-cache-dir --upgrade pip \
         "pydantic-settings>=2.1.0" \
         "aiosqlite>=0.19.0" \
         "litellm>=1.20.0" \
-        "mcp>=1.0.0"
+        "mcp>=1.0.0" \
+        "fastapi>=0.110.0" \
+        "uvicorn>=0.29.0"
 
 # Copy application source
 COPY contexta/ ./contexta/
