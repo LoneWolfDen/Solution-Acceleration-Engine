@@ -31,13 +31,7 @@ else:
 config = rx.Config(
     app_name="web",
     backend_port=8001,
-    # WebSocket backend URL — must be port 8001 to avoid collision with FastAPI.
     api_url=_api_url,
-    # Proxy all /api/* calls through to the FastAPI server on port 8000.
-    proxy_config=[
-        {"source": "/api/:path*", "destination": "http://localhost:8000/api/:path*"}
-    ],
     frontend_packages=[],
-    # Disable Reflex's own SQLite state persistence — we manage our own DB.
     db_url=None,
 )

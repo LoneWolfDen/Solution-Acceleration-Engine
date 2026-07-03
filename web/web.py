@@ -36,7 +36,9 @@ def index() -> rx.Component:
     )
 
 
-app = rx.App()
+app = rx.App(
+    api_transformer=fastapi_app,
+)
 
 app.add_page(
     index,
@@ -44,4 +46,3 @@ app.add_page(
     title="Solution Acceleration Engine",
     on_load=AppState.load_projects,
 )
-app.api.mount("/api", fastapi_app)
