@@ -1,0 +1,53 @@
+version: "3.9"
+
+# Solution Acceleration Engine — single-container Docker Compose configuration.
+#
+# Usage:
+#   docker-compose up --build          # first-time build + start
+#   docker-compose up                  # start with cached image
+#   docker-compose down                # stop and remove containers
+#   docker-compose down -v             # stop and wipe volumes (DATA LOSS)
+#
+# After start:
+#   http://localhost:8000              → Reflex UI
+#   http://localhost:8000/api/projects → FastAPI REST endpoint
+#   http://localhost:8000/docs         → FastAPI interactive docs
+#
+# Environment variables:
+#   Copy .env.example to .env and fill in API keys before running.
+#   All variables have safe defaults so the container starts without a .env file.
+
+services:
+  sae:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: solution-acceleration-engine
+    ports:
+      - "8000:8000"
+    volumes:
+      # SQLite DB and artifact files — survives container restarts and rebuilds.
+      - ./data:/app/data
+      # Export output (optional — remove this line if exports are not needed).
+      - ./exports:/app/exports
+    environment:
+      # DB and paths — mapped to the volume mount above.
+      - CONTEXTA_DB_PATH=/app/data/contexta.db
+      - CONTEXTA_EXPORT_PATH=/app/exports
+      - CONTEXTA_LOG_LEVEL=${CONTEXTA_LOG_LEVEL:-WARNING}
+
+      # LLM provider API keys — injected at runtime, never baked into the image.
+      # Set these in a .env file (copy from .env.example) or export them in your shell.
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+
+      # Ollama local endpoint — override if Ollama runs on a different host/port.
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://localhost:11434}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/admin/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
