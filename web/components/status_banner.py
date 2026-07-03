@@ -105,14 +105,26 @@ def _banner(
 
 
 def review_status_banner() -> rx.Component:
-    """Status banner for the active review job (Milestone 4.4 / 4.5)."""
+    """Status banner for the active review job (Milestone 4.4 / 4.5).
+
+    Rendered fixed bottom-right so it never overlaps content-pane widgets.
+    The toast sits at bottom=1.5rem; this banner sits above it at bottom=6rem.
+    """
     return rx.cond(
         AppState.active_review_id != "",
-        _banner(
-            "Review",
-            AppState.active_review_status,
-            AppState.active_review_progress_message,
-            _dismiss_button(AppState.dismiss_review_status),
+        rx.box(
+            _banner(
+                "Review",
+                AppState.active_review_status,
+                AppState.active_review_progress_message,
+                _dismiss_button(AppState.dismiss_review_status),
+            ),
+            position="fixed",
+            bottom="6rem",
+            right="1.5rem",
+            z_index="9998",
+            max_width="420px",
+            min_width="280px",
         ),
         rx.fragment(),
     )

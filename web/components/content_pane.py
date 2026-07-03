@@ -53,16 +53,6 @@ def _loading_view() -> rx.Component:
 
 def content_pane() -> rx.Component:
     return rx.box(
-        rx.box(
-            review_status_banner(),
-            position="absolute",
-            top="1rem",
-            right="1rem",
-            left="1rem",
-            z_index="10",
-            max_width="420px",
-            margin_left="auto",
-        ),
         rx.cond(
             AppState.is_loading,
             _loading_view(),
@@ -76,6 +66,7 @@ def content_pane() -> rx.Component:
                 ),
             ),
         ),
+        review_status_banner(),
         flex="1",
         height="100vh",
         overflow="hidden",
