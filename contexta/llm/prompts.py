@@ -38,8 +38,38 @@ CRITICAL OUTPUT INSTRUCTIONS:
 - Do NOT include any explanatory text, preamble, or commentary before or after the JSON.
 - Do NOT use any formatting other than the JSON structure itself.
 - Your entire response must be valid, parseable JSON starting with {{ and ending with }}.
-- The JSON object MUST conform exactly to this schema:
-{schema_json}
+- The JSON object MUST conform exactly to this example structure:
+
+{{
+  "dimension": "{dimension}",
+  "findings": [
+    {{
+      "dimension": "{dimension}",
+      "confidence": "AMBER",
+      "summary": "One-sentence summary of the issue.",
+      "detail": "Full explanation of the issue and its impact.",
+      "citations": [
+        {{
+          "file_path": "path/to/artifact.md",
+          "line_start": 1,
+          "line_end": 5,
+          "citation_type": "Direct Reference",
+          "excerpt": "Verbatim or paraphrased text from the source."
+        }}
+      ],
+      "mitigation_routing": "Risk Register"
+    }}
+  ],
+  "overall_confidence": "AMBER"
+}}
+
+FIELD RULES:
+- "dimension" must be exactly: {dimension}
+- "confidence" and "overall_confidence" must be one of: RED, AMBER, GREEN
+- "citation_type" must be one of: "Direct Reference", "Advised in Relation"
+- "mitigation_routing" must be one of: "Scope Modification", "Risk Register", "Assumptions Matrix", "Both R&A", "Ignored"
+- "findings" may be an empty list [] if no issues are found
+- "line_start" and "line_end" must be integers >= 1
 """
 
 ARBITRATOR_SYSTEM_TEMPLATE = """\
@@ -66,15 +96,10 @@ class PromptBuilder:
     blueprint:
         The active ``BlueprintRow`` fetched from ``prompt_blueprints``.
         ``master_prompt_text`` is embedded verbatim in every dimension prompt.
-    schema_json:
-        JSON Schema string describing the expected ``ReviewNodePayload`` shape.
-        Embedded in the dimension system prompt so the model sees the exact
-        contract it must satisfy.
     """
 
-    def __init__(self, blueprint: BlueprintRow, schema_json: str) -> None:
+    def __init__(self, blueprint: BlueprintRow) -> None:
         self._blueprint = blueprint
-        self._schema_json = schema_json
 
     # ── Public methods ────────────────────────────────────────────────────────
 
@@ -89,7 +114,7 @@ class PromptBuilder:
         - The dimension name
         - The full ``master_prompt_text`` from the active blueprint
         - The CRITICAL OUTPUT INSTRUCTIONS block (raw JSON, no fences)
-        - The ``ReviewNodePayload`` JSON schema
+        - A concrete example of the expected ``ReviewNodePayload`` structure
 
         The user prompt contains all ingested artifact content formatted as a
         labelled block so the model has grounded, citable source material.
@@ -110,7 +135,6 @@ class PromptBuilder:
         system = DIMENSION_SYSTEM_TEMPLATE.format(
             dimension=dimension.value,
             master_prompt_text=self._blueprint.master_prompt_text,
-            schema_json=self._schema_json,
         )
         user = f"PROPOSAL ARTIFACTS:\n\n{artifact_context}"
         return system, user

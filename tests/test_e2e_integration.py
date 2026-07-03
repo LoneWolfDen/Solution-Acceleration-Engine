@@ -121,7 +121,6 @@ class TestE2EFullPipeline:
 
         builder = PromptBuilder(
             blueprint=bp,
-            schema_json=ReviewNodePayload.model_json_schema().__str__(),
         )
 
         state_changes: list[TaskState] = []
@@ -182,7 +181,7 @@ class TestE2EFullPipeline:
         ))
 
         from contexta.llm.prompts import PromptBuilder
-        builder = PromptBuilder(blueprint=bp, schema_json="{}")
+        builder = PromptBuilder(blueprint=bp)
 
         transitions: dict[str, list[str]] = {}
 
@@ -235,7 +234,7 @@ class TestE2EArbitrator:
         ]
 
         from contexta.llm.prompts import PromptBuilder
-        builder = PromptBuilder(blueprint=bp, schema_json="{}")
+        builder = PromptBuilder(blueprint=bp)
         engine = ArbitratorEngine(
             config=LLMConfig(model="ollama/mistral"),
             builder=builder,
@@ -263,7 +262,7 @@ class TestE2EArbitrator:
 
         from contexta.pipeline.arbitrator import ArbitratorError
         from contexta.llm.prompts import PromptBuilder
-        builder = PromptBuilder(blueprint=bp, schema_json="{}")
+        builder = PromptBuilder(blueprint=bp)
         engine = ArbitratorEngine(
             config=LLMConfig(model="ollama/mistral"),
             builder=builder,

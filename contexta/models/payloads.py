@@ -17,4 +17,4 @@ class ReviewNodePayload(BaseModel):
     dimension: ReviewDimensionEnum
     findings: List[IssueFinding]
     overall_confidence: ConfidenceEnum
-    raw_llm_response: str
+    raw_llm_response: str = ""  # populated by pipeline after LLM validation, not by the LLM

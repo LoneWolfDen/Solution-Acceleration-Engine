@@ -240,6 +240,7 @@ def make_dimension_runner(
             raise DimensionValidationError(
                 f"Validation failed for {dimension.value!r}: {exc}"
             ) from exc
+        payload.raw_llm_response = llm_response.content
         return payload
 
     return run_dimension
