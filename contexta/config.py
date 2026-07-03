@@ -7,10 +7,15 @@ raise ConfigError immediately so the TUI can display a fatal error and halt.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Resolved once at import time so all callers get a consistent value.
+# contexta/config.py lives one level below the project root.
+_PROJECT_ROOT: Path = Path(__file__).parents[1]
 
 
 class ConfigError(Exception):
@@ -44,8 +49,8 @@ class ContextaConfig(BaseSettings):
 
     # ── Optional with defaults ────────────────────────────────────────────────
 
-    db_path: str = "/data/contexta.db"       # CONTEXTA_DB_PATH
-    export_path: str = "/exports"            # CONTEXTA_EXPORT_PATH
+    db_path: str = str(_PROJECT_ROOT / "data" / "contexta.db")  # CONTEXTA_DB_PATH
+    export_path: str = str(_PROJECT_ROOT / "exports")           # CONTEXTA_EXPORT_PATH
     llm_api_key: Optional[str] = None        # CONTEXTA_LLM_API_KEY
     llm_base_url: Optional[str] = None       # CONTEXTA_LLM_BASE_URL
     log_level: str = "WARNING"               # CONTEXTA_LOG_LEVEL
@@ -108,6 +113,30 @@ class ContextaConfig(BaseSettings):
                 "Only UNIFIED is supported in the MVP."
             )
         return upper
+
+
+    def as_llm_config(self) -> "LLMConfig":
+        """Build an ``LLMConfig`` from this config's LLM settings.
+
+        Maps:
+            ``llm_backend``  → ``LLMConfig.model``   (provider-prefixed, e.g. ``groq/llama3-8b-8192``)
+            ``llm_api_key``  → ``LLMConfig.api_key``
+            ``llm_base_url`` → ``LLMConfig.base_url``
+
+        Returns
+        -------
+        LLMConfig
+            Ready to pass directly to ``ArbitratorEngine`` or ``call_llm()``.
+        """
+        # Local import avoids a circular dependency at module load time
+        # (provider.py does not import config.py, so the cycle is one-way).
+        from .llm.provider import LLMConfig  # noqa: PLC0415
+
+        return LLMConfig(
+            model=self.llm_backend,
+            api_key=self.llm_api_key,
+            base_url=self.llm_base_url,
+        )
 
 
 def load_config() -> ContextaConfig:
