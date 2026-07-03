@@ -35,7 +35,7 @@ from contexta.models.enums import ReviewDimensionEnum
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _make_builder(master_prompt_text: str, schema_json: str = "{}") -> PromptBuilder:
+def _make_builder(master_prompt_text: str) -> PromptBuilder:
     blueprint = BlueprintRow(
         id="bp-test",
         blueprint_name="Test Blueprint",
@@ -43,7 +43,7 @@ def _make_builder(master_prompt_text: str, schema_json: str = "{}") -> PromptBui
         master_prompt_text=master_prompt_text,
         is_active=True,
     )
-    return PromptBuilder(blueprint=blueprint, schema_json=schema_json)
+    return PromptBuilder(blueprint=blueprint)
 
 
 # ── Template structure tests ──────────────────────────────────────────────────
@@ -58,8 +58,8 @@ class TestDimensionSystemTemplate:
     def test_has_master_prompt_text_placeholder(self):
         assert "{master_prompt_text}" in DIMENSION_SYSTEM_TEMPLATE
 
-    def test_has_schema_json_placeholder(self):
-        assert "{schema_json}" in DIMENSION_SYSTEM_TEMPLATE
+    def test_has_concrete_example_in_template(self):
+        assert "FIELD RULES" in DIMENSION_SYSTEM_TEMPLATE
 
     def test_critical_output_instructions_present(self):
         assert "CRITICAL OUTPUT INSTRUCTIONS" in DIMENSION_SYSTEM_TEMPLATE
@@ -99,10 +99,9 @@ class TestBlueprintInclusionInDimensionPrompt:
         self,
         dimension: ReviewDimensionEnum,
         blueprint_row: BlueprintRow,
-        minimal_schema_json: str,
     ):
         """All 12 dimensions must include master_prompt_text in system prompt."""
-        builder = PromptBuilder(blueprint=blueprint_row, schema_json=minimal_schema_json)
+        builder = PromptBuilder(blueprint=blueprint_row)
         system, _ = builder.build_dimension_prompt(dimension, artifact_context="artifacts")
         assert blueprint_row.master_prompt_text in system, (
             f"master_prompt_text not found in system prompt for dimension {dimension.value}"
@@ -111,34 +110,31 @@ class TestBlueprintInclusionInDimensionPrompt:
     def test_dimension_value_in_system_prompt(
         self,
         blueprint_row: BlueprintRow,
-        minimal_schema_json: str,
     ):
         """Dimension name appears in the system prompt."""
-        builder = PromptBuilder(blueprint=blueprint_row, schema_json=minimal_schema_json)
+        builder = PromptBuilder(blueprint=blueprint_row)
         system, _ = builder.build_dimension_prompt(
             ReviewDimensionEnum.ARCHITECTURE, artifact_context="ctx"
         )
         assert "Architecture" in system
 
-    def test_schema_json_in_system_prompt(
+    def test_dimension_value_in_concrete_example(
         self,
         blueprint_row: BlueprintRow,
     ):
-        """schema_json is embedded in the system prompt."""
-        schema = '{"type": "object", "required": ["dimension"]}'
-        builder = PromptBuilder(blueprint=blueprint_row, schema_json=schema)
+        """Dimension name appears inside the concrete example in the system prompt."""
+        builder = PromptBuilder(blueprint=blueprint_row)
         system, _ = builder.build_dimension_prompt(
             ReviewDimensionEnum.RISK, artifact_context=""
         )
-        assert schema in system
+        assert "Risk" in system
 
     def test_critical_instructions_in_system_prompt(
         self,
         blueprint_row: BlueprintRow,
-        minimal_schema_json: str,
     ):
         """CRITICAL OUTPUT INSTRUCTIONS block is always present."""
-        builder = PromptBuilder(blueprint=blueprint_row, schema_json=minimal_schema_json)
+        builder = PromptBuilder(blueprint=blueprint_row)
         system, _ = builder.build_dimension_prompt(
             ReviewDimensionEnum.SCOPE, artifact_context=""
         )
@@ -147,21 +143,17 @@ class TestBlueprintInclusionInDimensionPrompt:
     def test_user_prompt_contains_artifact_context(
         self,
         blueprint_row: BlueprintRow,
-        minimal_schema_json: str,
     ):
         """Artifact context appears in the user prompt, not the system prompt."""
         artifact_ctx = "FILE: /docs/proposal.md (100 lines)\nContent here"
-        builder = PromptBuilder(blueprint=blueprint_row, schema_json=minimal_schema_json)
+        builder = PromptBuilder(blueprint=blueprint_row)
         _, user = builder.build_dimension_prompt(
             ReviewDimensionEnum.INTENT, artifact_context=artifact_ctx
         )
         assert artifact_ctx in user
         assert "PROPOSAL ARTIFACTS" in user
 
-    def test_different_blueprints_produce_different_system_prompts(
-        self,
-        minimal_schema_json: str,
-    ):
+    def test_different_blueprints_produce_different_system_prompts(self):
         """Two blueprints with different texts produce different system prompts."""
         builder_a = _make_builder("Focus on delivery timeline risk only.")
         builder_b = _make_builder("Focus on commercial viability exclusively.")
@@ -176,10 +168,9 @@ class TestBlueprintInclusionInDimensionPrompt:
     def test_empty_artifact_context_produces_valid_user_prompt(
         self,
         blueprint_row: BlueprintRow,
-        minimal_schema_json: str,
     ):
         """Empty artifact context still produces a parseable user prompt."""
-        builder = PromptBuilder(blueprint=blueprint_row, schema_json=minimal_schema_json)
+        builder = PromptBuilder(blueprint=blueprint_row)
         _, user = builder.build_dimension_prompt(
             ReviewDimensionEnum.NFR, artifact_context=""
         )
@@ -193,8 +184,6 @@ class TestBlueprintInclusionInDimensionPrompt:
             ReviewDimensionEnum.OWNERSHIP, artifact_context=""
         )
         assert multiline in system
-
-
 # ── Arbitrator prompt tests ───────────────────────────────────────────────────
 
 
@@ -204,19 +193,17 @@ class TestArbitratorPrompt:
     def test_system_contains_critical_instructions(
         self,
         blueprint_row: BlueprintRow,
-        minimal_schema_json: str,
     ):
-        builder = PromptBuilder(blueprint=blueprint_row, schema_json=minimal_schema_json)
+        builder = PromptBuilder(blueprint=blueprint_row)
         system, _ = builder.build_arbitrator_prompt(payloads=[])
         assert "CRITICAL OUTPUT INSTRUCTIONS" in system
 
     def test_user_contains_all_payloads(
         self,
         blueprint_row: BlueprintRow,
-        minimal_schema_json: str,
     ):
         payloads = [f'{{"payload": {i}}}' for i in range(12)]
-        builder = PromptBuilder(blueprint=blueprint_row, schema_json=minimal_schema_json)
+        builder = PromptBuilder(blueprint=blueprint_row)
         _, user = builder.build_arbitrator_prompt(payloads=payloads)
         for p in payloads:
             assert p in user
@@ -224,11 +211,10 @@ class TestArbitratorPrompt:
     def test_user_payload_numbering(
         self,
         blueprint_row: BlueprintRow,
-        minimal_schema_json: str,
     ):
         """Each payload is labelled with a 1-based index separator."""
         payloads = ['{"a": 1}', '{"b": 2}', '{"c": 3}']
-        builder = PromptBuilder(blueprint=blueprint_row, schema_json=minimal_schema_json)
+        builder = PromptBuilder(blueprint=blueprint_row)
         _, user = builder.build_arbitrator_prompt(payloads=payloads)
         assert "--- 1 ---" in user
         assert "--- 2 ---" in user
@@ -237,9 +223,8 @@ class TestArbitratorPrompt:
     def test_empty_payloads_produces_valid_prompts(
         self,
         blueprint_row: BlueprintRow,
-        minimal_schema_json: str,
     ):
-        builder = PromptBuilder(blueprint=blueprint_row, schema_json=minimal_schema_json)
+        builder = PromptBuilder(blueprint=blueprint_row)
         system, user = builder.build_arbitrator_prompt(payloads=[])
         assert isinstance(system, str) and len(system) > 0
         assert isinstance(user, str)
@@ -247,9 +232,8 @@ class TestArbitratorPrompt:
     def test_return_type_is_tuple_of_two_strings(
         self,
         blueprint_row: BlueprintRow,
-        minimal_schema_json: str,
     ):
-        builder = PromptBuilder(blueprint=blueprint_row, schema_json=minimal_schema_json)
+        builder = PromptBuilder(blueprint=blueprint_row)
         result = builder.build_dimension_prompt(ReviewDimensionEnum.RISK, "ctx")
         assert isinstance(result, tuple) and len(result) == 2
         assert all(isinstance(s, str) for s in result)
@@ -262,22 +246,20 @@ class TestArbitratorPrompt:
     master_prompt_text=st.text(min_size=1, max_size=2000),
     dimension=st.sampled_from(list(ReviewDimensionEnum)),
     artifact_context=st.text(max_size=500),
-    schema_json=st.text(max_size=200),
 )
 @settings(max_examples=500)
 def test_property_11_blueprint_text_always_in_system_prompt(
     master_prompt_text: str,
     dimension: ReviewDimensionEnum,
     artifact_context: str,
-    schema_json: str,
 ) -> None:
     """Property 11: master_prompt_text T is a substring of build_dimension_prompt() system.
 
-    For ANY master_prompt_text T, ANY ReviewDimensionEnum value D, ANY
-    artifact_context, and ANY schema_json, the system string returned by
-    build_dimension_prompt(D, ...) MUST contain T as a verbatim substring.
+    For ANY master_prompt_text T, ANY ReviewDimensionEnum value D, and ANY
+    artifact_context, the system string returned by build_dimension_prompt(D, ...)
+    MUST contain T as a verbatim substring.
     """
-    builder = _make_builder(master_prompt_text, schema_json)
+    builder = _make_builder(master_prompt_text)
     system, _ = builder.build_dimension_prompt(dimension, artifact_context)
 
     assert master_prompt_text in system, (
