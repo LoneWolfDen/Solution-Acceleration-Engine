@@ -44,3 +44,4 @@ app.add_page(
     title="Solution Acceleration Engine",
     on_load=AppState.load_projects,
 )
+app.api.mount("/api", fastapi_app)
