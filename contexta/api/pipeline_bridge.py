@@ -242,7 +242,7 @@ async def run_review_pipeline_task(
         import json as _json
         builder = PromptBuilder(
             blueprint=blueprint,
-            schema_json=_json.dumps(ReviewNodePayload.model_json_schema()),
+            #schema_json=_json.dumps(ReviewNodePayload.model_json_schema()),
         )
 
         async def _on_state_change(task) -> None:
