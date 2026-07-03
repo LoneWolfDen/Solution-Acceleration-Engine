@@ -55,7 +55,8 @@ _PROVIDER_TO_MODEL: dict[str, str] = {
 }
 
 # Preference order when the caller does not request a specific backend.
-_PROVIDER_PRIORITY: List[str] = [KEY_GROQ, KEY_OPENROUTER, KEY_GEMINI, KEY_OLLAMA_URL]
+_PROVIDER_PRIORITY: List[str] = [
+    KEY_GROQ, KEY_OPENROUTER, KEY_GEMINI, KEY_OLLAMA_URL]
 
 
 async def resolve_llm_config(
@@ -81,7 +82,8 @@ async def resolve_llm_config(
     config = await api_repo.get_all_config(conn)
 
     candidates = (
-        [_backend_key(requested_backend)] if requested_backend else _PROVIDER_PRIORITY
+        [_backend_key(requested_backend)
+         ] if requested_backend else _PROVIDER_PRIORITY
     )
 
     for key in candidates:
@@ -187,7 +189,8 @@ async def get_or_create_active_blueprint(conn: aiosqlite.Connection):
         prompt_text=_DEFAULT_BLUEPRINT_PROMPT,
     )
     await activate_blueprint(conn, created.id)
-    logger.info("Seeded and activated default blueprint '%s'.", created.blueprint_name)
+    logger.info("Seeded and activated default blueprint '%s'.",
+                created.blueprint_name)
     return created
 
 
@@ -212,7 +215,8 @@ async def run_review_pipeline_task(
     try:
         job = await api_repo.get_review_job(conn, review_id)
         if job is None:
-            logger.error("run_review_pipeline_task: review job %s not found.", review_id)
+            logger.error(
+                "run_review_pipeline_task: review job %s not found.", review_id)
             return
 
         await api_repo.update_review_job_status(
@@ -242,7 +246,7 @@ async def run_review_pipeline_task(
         import json as _json
         builder = PromptBuilder(
             blueprint=blueprint,
-            #schema_json=_json.dumps(ReviewNodePayload.model_json_schema()),
+            # schema_json=_json.dumps(ReviewNodePayload.model_json_schema()),
         )
 
         async def _on_state_change(task) -> None:
@@ -261,7 +265,8 @@ async def run_review_pipeline_task(
         await orchestrator.launch_all()
 
         if not orchestrator.all_complete():
-            incomplete = [d.value for d in orchestrator.incomplete_dimensions()]
+            incomplete = [
+                d.value for d in orchestrator.incomplete_dimensions()]
             await api_repo.update_review_job_status(
                 conn, review_id, "failed",
                 progress_message=f"Dimensions failed: {', '.join(incomplete)}",
@@ -278,7 +283,8 @@ async def run_review_pipeline_task(
             node_name=f"{persona_label} Review — {version.name}",
         )
         await conn.execute(
-            "UPDATE nodes SET version_id = ? WHERE id = ?", (job.version_id, node.id)
+            "UPDATE nodes SET version_id = ? WHERE id = ?", (
+                job.version_id, node.id)
         )
         await conn.commit()
 
@@ -286,15 +292,18 @@ async def run_review_pipeline_task(
             conn, review_id, "complete",
             progress_message="Review complete.", node_id=node.id,
         )
-        logger.info("Review %s completed — node %s written.", review_id, node.id)
+        logger.info("Review %s completed — node %s written.",
+                    review_id, node.id)
     except Exception as exc:  # noqa: BLE001 — background task: must not raise
-        logger.exception("run_review_pipeline_task failed for review %s", review_id)
+        logger.exception(
+            "run_review_pipeline_task failed for review %s", review_id)
         try:
             await api_repo.update_review_job_status(
                 conn, review_id, "failed", progress_message=f"Unexpected error: {exc}"
             )
         except Exception:
-            logger.exception("Failed to record failure status for review %s", review_id)
+            logger.exception(
+                "Failed to record failure status for review %s", review_id)
     finally:
         await conn.close()
 
@@ -334,7 +343,8 @@ async def run_proposal_pipeline_task(proposal_id: str, db_path: str) -> None:
     try:
         job = await api_repo.get_proposal_job(conn, proposal_id)
         if job is None:
-            logger.error("run_proposal_pipeline_task: proposal job %s not found.", proposal_id)
+            logger.error(
+                "run_proposal_pipeline_task: proposal job %s not found.", proposal_id)
             return
 
         await api_repo.update_proposal_job_status(
@@ -395,13 +405,15 @@ async def run_proposal_pipeline_task(proposal_id: str, db_path: str) -> None:
             proposal_id, synthesis_node.id,
         )
     except Exception as exc:  # noqa: BLE001 — background task: must not raise
-        logger.exception("run_proposal_pipeline_task failed for proposal %s", proposal_id)
+        logger.exception(
+            "run_proposal_pipeline_task failed for proposal %s", proposal_id)
         try:
             await api_repo.update_proposal_job_status(
                 conn, proposal_id, "failed", progress_message=f"Unexpected error: {exc}"
             )
         except Exception:
-            logger.exception("Failed to record failure status for proposal %s", proposal_id)
+            logger.exception(
+                "Failed to record failure status for proposal %s", proposal_id)
     finally:
         await conn.close()
 
@@ -419,7 +431,8 @@ def _load_dimension_payloads(exploration_node) -> List[ReviewNodePayload]:
 
     raw_metadata = exploration_node.metadata_json
     metadata = (
-        _json.loads(raw_metadata) if isinstance(raw_metadata, str) else raw_metadata
+        _json.loads(raw_metadata) if isinstance(
+            raw_metadata, str) else raw_metadata
     )
     dimension_dicts = metadata.get("dimensions") or []
     if not dimension_dicts:
