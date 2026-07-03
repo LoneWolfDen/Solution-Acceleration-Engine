@@ -55,12 +55,6 @@ def blueprint_row() -> BlueprintRow:
     )
 
 
-@pytest.fixture()
-def minimal_schema_json() -> str:
-    """Minimal JSON schema string used to construct a PromptBuilder."""
-    return '{"type": "object", "properties": {"dimension": {"type": "string"}}}'
-
-
 # ── Registry fixtures ─────────────────────────────────────────────────────────
 
 
