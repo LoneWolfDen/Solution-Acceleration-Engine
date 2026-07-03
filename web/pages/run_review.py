@@ -165,9 +165,10 @@ def run_review_page() -> rx.Component:
 
 # Registering the dynamic route via @rx.page adds ``version_id`` as an
 # auto-populated AppState var (Reflex convention for [version_id] segments).
-# on_load copies it into run_review_version_id and resets the form state.
+# on_load calls both init_run_review_page (resets form state / captures version_id)
+# and load_admin_page (populates run_review_available_backends from admin config).
 run_review_page = rx.page(
     route="/run-review/[version_id]",
-    on_load=AppState.init_run_review_page,
+    on_load=[AppState.init_run_review_page, AppState.load_admin_page],
     title="Run Review — SAE",
 )(run_review_page)
