@@ -859,14 +859,14 @@ class AppState(rx.State):
                         self.active_review_status = "failed"
                         self.active_review_progress_message = f"Polling error: {exc}"
                         self.review_poll_active = False
+                        self.set_toast(f"Review failed — polling error: {exc}", is_error=True)
                     return
 
             status = data.get("status", "queued")
+            progress_message = data.get("progress_message") or ""
             async with self:
                 self.active_review_status = status
-                self.active_review_progress_message = data.get(
-                    "progress_message"
-                ) or ""
+                self.active_review_progress_message = progress_message
 
             if status in ("complete", "failed"):
                 terminal = True
@@ -877,7 +877,7 @@ class AppState(rx.State):
         if status == "failed":
             async with self:
                 self.set_toast(
-                    self.active_review_progress_message or "Review failed.",
+                    progress_message or "Review failed.",
                     is_error=True,
                 )
             return
