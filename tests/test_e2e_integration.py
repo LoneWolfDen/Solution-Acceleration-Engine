@@ -121,7 +121,7 @@ class TestE2EFullPipeline:
 
         builder = PromptBuilder(
             blueprint=bp,
-            schema_json=ReviewNodePayload.model_json_schema().__str__(),
+            schema_json=ReviewNodePayload.llm_schema_json(),
         )
 
         state_changes: list[TaskState] = []

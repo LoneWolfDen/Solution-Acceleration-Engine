@@ -205,8 +205,13 @@ def make_dimension_runner(
         system, user = builder.build_dimension_prompt(dimension, artifact_context)
         llm_response = await call_llm(config, system, user)
         try:
-            payload = ReviewNodePayload.model_validate_json(llm_response.content)
-        except ValidationError as exc:
+            # Parse into a dict first so we can inject raw_llm_response.
+            # The LLM must not be asked to produce this field — it is a
+            # transport-layer annotation set here after a successful call.
+            parsed = json.loads(llm_response.content)
+            parsed["raw_llm_response"] = llm_response.content
+            payload = ReviewNodePayload.model_validate(parsed)
+        except (json.JSONDecodeError, ValidationError) as exc:
             raise DimensionValidationError(
                 f"Validation failed for {dimension.value!r}: {exc}"
             ) from exc
