@@ -194,14 +194,29 @@ def make_dimension_runner(
     config: LLMConfig,
     builder: PromptBuilder,
     registry: ArtifactRegistry,
+    max_retries: int = 4,
+    retry_max_wait_seconds: float = 120.0,
 ) -> Callable[[ReviewDimensionEnum], Awaitable[ReviewNodePayload]]:
     """Return a runner_fn closed over the given config, builder, and registry.
 
     The returned coroutine:
     1. Builds the (system, user) prompt pair for the dimension.
-    2. Calls ``call_llm()`` (temperature=0.0 enforced internally).
+    2. Calls ``call_llm()`` with retry on RateLimitError (temperature=0.0 enforced).
     3. Validates the JSON response against ``ReviewNodePayload``.
     4. Returns the validated payload (in-memory only — no DB write here).
+
+    Parameters
+    ----------
+    config:
+        LiteLLM model configuration.
+    builder:
+        Prompt builder instance.
+    registry:
+        Artifact registry used to build the context string.
+    max_retries:
+        Passed directly to ``call_llm()`` — maximum retry attempts on 429.
+    retry_max_wait_seconds:
+        Hard ceiling on any single backoff wait, passed to ``call_llm()``.
 
     Raises
     ------
@@ -212,7 +227,13 @@ def make_dimension_runner(
 
     async def run_dimension(dimension: ReviewDimensionEnum) -> ReviewNodePayload:
         system, user = builder.build_dimension_prompt(dimension, artifact_context)
-        llm_response = await call_llm(config, system, user)
+        llm_response = await call_llm(
+            config,
+            system,
+            user,
+            max_retries=max_retries,
+            retry_max_wait_seconds=retry_max_wait_seconds,
+        )
         try:
             payload = ReviewNodePayload.model_validate_json(llm_response.content)
         except ValidationError as exc:
