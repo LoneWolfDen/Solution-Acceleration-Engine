@@ -186,11 +186,7 @@ def version_detail() -> rx.Component:
                                 variant="soft",
                                 color_scheme="indigo",
                             ),
-                            href=rx.cond(
-                                version["id"],
-                                f"/run-review/" + version["id"].to(str),
-                                "/",
-                            ),
+                            href="/run-review/" + version["id"].to(str),
                             flex_shrink="0",
                         ),
                         spacing="3",

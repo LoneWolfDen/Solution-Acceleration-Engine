@@ -162,16 +162,52 @@ async def get_review_payload(
     node_id: str,
     conn: aiosqlite.Connection = Depends(get_db),
 ) -> schemas.ReviewPayloadResponse:
-    """Return the full Review_Payload for a review job ID."""
+    """Return the full Review_Payload for a review job ID or a node UUID.
+
+    Accepts two caller patterns:
+    - ``node_id`` is a ``review_jobs.id`` (UUID of the job itself) — used by
+      ``_review_row`` in version_detail.py which passes ``review["review_id"]``.
+    - ``node_id`` is a ``nodes.id`` (UUID of the committed exploration node) —
+      used by ``_node_row`` in version_detail.py and the sidebar which pass
+      ``node["id"]`` after the node appears in the project tree.
+
+    Both patterns must return a valid ReviewPayloadResponse.
+    """
+    # Primary: treat the param as a review_job id.
     job = await api_repo.get_review_job(conn, node_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"Review '{node_id}' not found.")
+    if job is not None:
+        node = None
+        if job.node_id:
+            node = await db_repo.get_node(conn, job.node_id)
+        return _build_review_payload(job, node)
 
-    node = None
-    if job.node_id:
-        node = await db_repo.get_node(conn, job.node_id)
+    # Fallback: treat the param as a direct node UUID (called from node_row /
+    # sidebar after the pipeline writes the node and the project tree refreshes).
+    # Find the review_job that produced this node.
+    direct_node = await db_repo.get_node(conn, node_id)
+    if direct_node is None:
+        raise HTTPException(status_code=404, detail=f"Review or node '{node_id}' not found.")
 
-    return _build_review_payload(job, node)
+    # Look up the review_job whose node_id matches.
+    cursor = await conn.execute(
+        "SELECT * FROM review_jobs WHERE node_id = ? LIMIT 1", (node_id,)
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        # Node exists but has no associated review job (e.g. a synthesis node
+        # or a TUI-written node).  Return a minimal shell response.
+        return schemas.ReviewPayloadResponse(
+            review_id=node_id,
+            project_id=direct_node.project_id,
+            version_id=direct_node.version_id or "",
+            status="complete",
+            run_date=direct_node.created_at,
+            persona="Reviewer",
+        )
+
+    from contexta.api.repositories import _row_to_review_job
+    job = _row_to_review_job(row)
+    return _build_review_payload(job, direct_node)
 
 
 @router.post("/reviews", response_model=schemas.CreateReviewResponse, status_code=202)
