@@ -14,6 +14,7 @@ On ``ConfigError``, prints a descriptive message and halts with exit code 1.
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 
 
@@ -27,6 +28,13 @@ async def _async_main() -> None:
     except ConfigError as exc:
         print(f"FATAL: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
+
+    logging.basicConfig(
+        level=config.log_level,
+        format="%(asctime)s %(levelname)-8s %(name)s — %(message)s",
+        datefmt="%H:%M:%S",
+        stream=sys.stderr,
+    )
 
     db = await init_database(config.db_path)
 

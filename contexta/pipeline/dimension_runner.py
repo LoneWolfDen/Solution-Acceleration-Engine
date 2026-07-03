@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -32,6 +33,9 @@ from ..llm.prompts import PromptBuilder
 from ..mcp.artifact_registry import ArtifactRegistry
 from ..models.enums import ReviewDimensionEnum
 from ..models.payloads import ReviewNodePayload
+
+
+logger = logging.getLogger(__name__)
 
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
@@ -175,6 +179,11 @@ class TaskOrchestrator:
         except Exception as exc:
             task.error_message = str(exc)
             task.state = TaskState.FAILED
+            logger.exception(
+                "Dimension %r failed: %s",
+                dimension.value,
+                exc,
+            )
         await self._on_state_change(task)
 
 

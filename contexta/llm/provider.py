@@ -181,9 +181,18 @@ async def call_llm(
     if config.base_url is not None:
         kwargs["base_url"] = config.base_url
 
+    logger.debug(
+        "LLM request — model=%r max_tokens=%d system_len=%d user_len=%d",
+        config.model,
+        max_tokens,
+        len(system),
+        len(user),
+    )
+
     try:
         response = await litellm.acompletion(**kwargs)
     except Exception as exc:
+        logger.exception("LLM call failed — model=%r error=%s", config.model, exc)
         raise LLMCallError(f"LiteLLM call failed for model {config.model!r}: {exc}") from exc
 
     try:
@@ -195,6 +204,14 @@ async def call_llm(
         ) from exc
 
     content = _normalise_json_content(content, config.model)
+
+    logger.debug(
+        "LLM response — model=%r finish_reason=%r content_len=%d content=%.500s",
+        config.model,
+        finish_reason,
+        len(content),
+        content,
+    )
 
     return LLMResponse(
         content=content,
