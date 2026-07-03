@@ -1,27 +1,35 @@
 """
-contexta/api/config.py — Environment variable parsing for the API server.
+contexta/api/config.py — Minimal configuration for the Web API layer.
 
-Reads the same CONTEXTA_* variables as the core ContextaConfig so the API
-server can run using the existing environment without additional setup.
-Only the subset of settings required by the API layer is declared here.
+Intentionally separate from ContextaConfig (which requires CONTEXTA_LLM_BACKEND).
+The API server can start with no LLM configuration — users set providers via
+the Admin Dashboard, which writes values to the app_config DB table.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Must match the default computed in contexta/api/__init__.py exactly.
+# Background tasks (contexta/api/pipeline_bridge.py) call
+# load_api_config().db_path to open their own aiosqlite connection — if this
+# default ever drifts from the one used by the main app's lifespan, review
+# and proposal jobs are written to a different database than the one the
+# background task reads from, so they silently never progress past "queued"
+# (see git history for the incident this comment documents).
+_PROJECT_ROOT: Path = Path(__file__).parents[2]
+_DEFAULT_DB_PATH: str = str(_PROJECT_ROOT / "data" / "contexta.db")
 
-class ApiConfig(BaseSettings):
+
+class WebAPIConfig(BaseSettings):
     """
-    Configuration for the FastAPI server, loaded from environment variables.
+    Minimal settings needed to boot the FastAPI server.
 
-    Required:
-        CONTEXTA_LLM_BACKEND  — passed through; not used by the API layer
-                                directly but required so the shared DB init
-                                path does not fail.
-
-    Optional (have defaults):
-        CONTEXTA_DB_PATH  — path to the SQLite database file.
+    Only db_path and log_level are required at startup.
+    LLM provider keys are stored in the app_config DB table and managed
+    at runtime through the Admin Dashboard.
     """
 
     model_config = SettingsConfigDict(
@@ -30,14 +38,10 @@ class ApiConfig(BaseSettings):
         extra="ignore",
     )
 
-    # The API only needs the DB path to open the connection.
-    db_path: str = "/data/contexta.db"   # CONTEXTA_DB_PATH
+    db_path: str = _DEFAULT_DB_PATH
+    log_level: str = "INFO"
 
 
-def load_api_config() -> ApiConfig:
-    """Load and return API configuration from environment variables.
-
-    Raises:
-        ValidationError: if any required variable is missing or malformed.
-    """
-    return ApiConfig()
+def load_api_config() -> WebAPIConfig:
+    """Load and return the web API configuration from environment variables."""
+    return WebAPIConfig()
