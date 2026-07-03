@@ -50,7 +50,10 @@ def _all_findings() -> list:
     """Return one ``IssueFinding`` per dimension using the shared mock factory."""
     findings = []
     for dim in ReviewDimensionEnum:
-        payload = ReviewNodePayload.model_validate_json(make_dimension_llm_response(dim))
+        raw = make_dimension_llm_response(dim)
+        parsed = json.loads(raw)
+        parsed["raw_llm_response"] = raw
+        payload = ReviewNodePayload.model_validate(parsed)
         findings.extend(payload.findings)
     return findings
 

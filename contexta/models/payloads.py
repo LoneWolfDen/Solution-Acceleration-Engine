@@ -29,6 +29,10 @@ from pydantic import BaseModel, Field, model_validator
 from .enums import ConfidenceEnum, ReviewDimensionEnum
 from .findings import IssueFinding, UserAnnotation
 
+# Field excluded from the schema shown to the LLM — it is injected by the
+# runner after parsing and must never be produced by the model itself.
+_LLM_EXCLUDED_FIELDS = {"raw_llm_response"}
+
 
 class ReviewNodePayload(BaseModel):
     dimension: ReviewDimensionEnum

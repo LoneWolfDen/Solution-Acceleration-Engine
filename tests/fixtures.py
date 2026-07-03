@@ -28,42 +28,41 @@ from contexta.models.enums import (
     ReviewDimensionEnum,
 )
 from contexta.models.findings import IssueFinding
-from contexta.models.payloads import ReviewNodePayload
 
 
 # ── Dimension payload stubs ───────────────────────────────────────────────────
 
 
 def make_dimension_llm_response(dim: ReviewDimensionEnum) -> str:
-    """Return a valid ``ReviewNodePayload`` JSON string for *dim*.
+    """Return a valid LLM JSON response string for *dim*.
 
-    Produces a minimal but schema-valid payload: one AMBER finding with a
-    single direct-reference citation, routed to the risk register.
+    Produces a minimal but schema-valid payload without ``raw_llm_response``,
+    matching what a real LLM would return (the runner injects that field
+    post-parse from the transport layer).
     """
-    payload = ReviewNodePayload(
-        dimension=dim,
-        findings=[
-            IssueFinding(
-                dimension=dim,
-                confidence=ConfidenceEnum.AMBER,
-                summary=f"Test finding for {dim.value}",
-                detail=f"Detailed analysis of {dim.value}",
-                citations=[
-                    SourceCitation(
-                        file_path="/proposal.md",
-                        line_start=1,
-                        line_end=5,
-                        citation_type=CitationTypeEnum.DIRECT_REFERENCE,
-                        excerpt="test excerpt",
-                    )
+    data = {
+        "dimension": dim.value,
+        "findings": [
+            {
+                "dimension": dim.value,
+                "confidence": ConfidenceEnum.AMBER.value,
+                "summary": f"Test finding for {dim.value}",
+                "detail": f"Detailed analysis of {dim.value}",
+                "citations": [
+                    {
+                        "file_path": "/proposal.md",
+                        "line_start": 1,
+                        "line_end": 5,
+                        "citation_type": CitationTypeEnum.DIRECT_REFERENCE.value,
+                        "excerpt": "test excerpt",
+                    }
                 ],
-                mitigation_routing=MitigationRoutingEnum.RISK_REGISTER,
-            )
+                "mitigation_routing": MitigationRoutingEnum.RISK_REGISTER.value,
+            }
         ],
-        overall_confidence=ConfidenceEnum.AMBER,
-        raw_llm_response="{}",
-    )
-    return payload.model_dump_json()
+        "overall_confidence": ConfidenceEnum.AMBER.value,
+    }
+    return json.dumps(data)
 
 
 def make_arbitrator_response() -> str:
