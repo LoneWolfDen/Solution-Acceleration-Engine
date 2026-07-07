@@ -47,3 +47,7 @@ omit = ["contexta/__main__.py", "contexta/tui/*"]
 [tool.coverage.report]
 show_missing = true
 fail_under = 90
+
+[tool.reflex]
+app_name = "web"
+backend_port = 8000
