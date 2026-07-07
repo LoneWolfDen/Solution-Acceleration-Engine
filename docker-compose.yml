@@ -1,40 +1,34 @@
 # docker-compose.yml — single-container deployment for Solution Acceleration Engine.
 #
-# Ports:
-#   3000  →  Reflex Next.js frontend
-#   8000  →  FastAPI REST API  (AppState calls this via httpx)
-#   8001  →  Reflex WebSocket state-sync backend
+# Architecture:
+#   Single service, single port (8000). Reflex backend serves the UI
+#   (pre-built static assets) and FastAPI API routes on the same port.
 #
 # Usage:
-#   docker compose up --build          # first run
+#   docker compose up --build          # first run (builds image + starts)
 #   docker compose up -d               # detached
-#   docker compose logs -f contexta    # tail logs
-#   docker compose down -v             # destroy including volumes
+#   docker compose logs -f sae         # tail logs
+#   docker compose down                # stop (data persists in ./data/)
+#
+# Data persistence:
+#   SQLite DB and artifact files stored in ./data/ (bind-mounted).
+#   Survives docker compose down / up cycles.
 
 services:
-  contexta:
+  sae:
     build:
       context: .
       dockerfile: Dockerfile
     ports:
-      # GitHub Codespaces auto-forwards these ports to *.app.github.dev URLs.
-      # Map identically so CODESPACE_NAME-derived URLs resolve without translation.
-      - "3000:3000"   # Reflex frontend
-      - "8000:8000"   # FastAPI REST API
-      - "8001:8001"   # Reflex state-sync WebSocket
+      - "8000:8000"
     volumes:
-      - contexta_data:/data
-      - contexta_exports:/exports
+      - ./data:/app/data
     environment:
-      CONTEXTA_DB_PATH: /data/contexta.db
-      CONTEXTA_EXPORT_PATH: /exports
-      CONTEXTA_LOG_LEVEL: WARNING
-      # Override at runtime with your LLM provider key:
-      #   docker compose run -e CONTEXTA_LLM_BACKEND=groq/llama3-8b-8192 contexta
-      CONTEXTA_API_URL: http://localhost:8000
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
     env_file:
-      # Rename .env.example → .env and populate CONTEXTA_LLM_BACKEND.
-      # The compose file ignores missing .env files gracefully.
       - path: .env
         required: false
     restart: unless-stopped
@@ -43,10 +37,4 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 45s
-
-volumes:
-  contexta_data:
-    driver: local
-  contexta_exports:
-    driver: local
+      start_period: 60s
