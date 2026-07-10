@@ -35,5 +35,5 @@ config = rx.Config(
     frontend_packages=[],
     db_url=None,
     vite_allowed_hosts=True,
-    ignored_dirs=[".git", ".github", ".vscode", "env", "__pycache__",".env", "node_modules", "dist", "build", ".next", ".output", ".cache"],
+    ignored_dirs=[".git", ".github", ".vscode", "venv", "__pycache__",".venv", "node_modules", "dist", "build", ".next", ".output", ".cache"],
 )
