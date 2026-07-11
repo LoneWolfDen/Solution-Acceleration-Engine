@@ -33,7 +33,7 @@ config = rx.Config(
     backend_port=8000,
     api_url=_api_url,
     frontend_packages=[],
-    db_url=None,
+    db_url="sqlite:///contexta.db",
     vite_allowed_hosts=True,
     ignored_dirs=[".git", ".github", ".vscode", "venv", "__pycache__",".venv", "node_modules", "dist", "build", ".next", ".output", ".cache"],
 )
