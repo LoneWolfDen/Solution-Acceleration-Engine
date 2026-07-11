@@ -41,7 +41,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ..db.schema import init_database
 from .config import load_api_config
-from .routers import admin, artifacts, projects, proposals, reviews, versions
+from .routers import admin, artifacts, insights, nodes, projects, proposals, reviews, versions
 
 logger = logging.getLogger(__name__)
 
@@ -162,4 +162,6 @@ app.include_router(versions.router, prefix="/api")
 app.include_router(artifacts.router, prefix="/api")
 app.include_router(reviews.router, prefix="/api")
 app.include_router(proposals.router, prefix="/api")
+app.include_router(nodes.router, prefix="/api")
+app.include_router(insights.router, prefix="/api")
 app.include_router(admin.router, prefix="/api")

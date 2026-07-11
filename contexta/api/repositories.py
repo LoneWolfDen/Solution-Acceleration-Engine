@@ -641,6 +641,31 @@ async def insert_proposal_review_links(
     await conn.commit()
 
 
+async def get_linked_proposal_review_ids(
+    conn: aiosqlite.Connection,
+    proposal_job_id: str,
+) -> List[str]:
+    """Return all review_job_id values linked to a given proposal job.
+
+    Used by the pipeline bridge to load all exploration nodes for a
+    multi-review proposal (Gap 2).
+
+    Args:
+        conn:             Open aiosqlite connection.
+        proposal_job_id:  FK → proposal_jobs.id.
+
+    Returns:
+        List of review job IDs.  Empty list if no rows exist (legacy proposals
+        with only the FK column should fall back to proposal_jobs.review_job_id).
+    """
+    cursor = await conn.execute(
+        "SELECT review_job_id FROM proposal_review_links WHERE proposal_job_id = ?",
+        (proposal_job_id,),
+    )
+    rows = await cursor.fetchall()
+    return [row["review_job_id"] for row in rows]
+
+
 async def list_proposals_for_version(
     conn: aiosqlite.Connection,
     version_id: str,

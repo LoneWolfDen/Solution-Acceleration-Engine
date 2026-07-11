@@ -210,13 +210,49 @@ async def get_review_payload(
     return _build_review_payload(job, direct_node)
 
 
+@router.get(
+    "/versions/{version_id}/reviews/linkable",
+    response_model=schemas.LinkableReviewsResponse,
+)
+async def list_linkable_reviews(
+    version_id: str,
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> schemas.LinkableReviewsResponse:
+    """Return all completed Review_Jobs for a version eligible for linking.
+
+    Gap 1 — Requirement 1.4: only jobs with status='complete' are returned.
+    The frontend uses this list to populate the chip selector before a new
+    review is triggered.
+    """
+    version = await db_repo.get_version(conn, version_id)
+    if version is None:
+        raise HTTPException(status_code=404, detail=f"Version '{version_id}' not found.")
+
+    items = await api_repo.list_linkable_reviews(conn, version_id)
+    return schemas.LinkableReviewsResponse(
+        reviews=[
+            schemas.LinkableReviewItem(
+                review_id=item.review_id,
+                persona=item.persona,
+                run_date=item.run_date,
+            )
+            for item in items
+        ]
+    )
+
+
 @router.post("/reviews", response_model=schemas.CreateReviewResponse, status_code=202)
 async def create_review(
     body: schemas.CreateReviewRequest,
     background_tasks: BackgroundTasks,
     conn: aiosqlite.Connection = Depends(get_db),
 ) -> schemas.CreateReviewResponse:
-    """Trigger the review pipeline.  Returns immediately with status='queued'."""
+    """Trigger the review pipeline.  Returns immediately with status='queued'.
+
+    Gap 1 — Requirement 1.2/1.3: if ``linked_review_ids`` is provided, each
+    ID is validated to exist and be complete before any row is written.
+    On success, junction rows are inserted into ``review_links``.
+    """
     version = await db_repo.get_version(conn, body.version_id)
     if version is None:
         raise HTTPException(
@@ -227,9 +263,35 @@ async def create_review(
             status_code=422, detail="persona_roles must contain at least one role."
         )
 
+    # Gap 1 — validate every linked_review_id before writing anything.
+    for linked_id in body.linked_review_ids:
+        linked_job = await api_repo.get_review_job(conn, linked_id)
+        if linked_job is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Linked review '{linked_id}' does not exist.",
+            )
+        if linked_job.status != "complete":
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Linked review '{linked_id}' is not complete "
+                    f"(status='{linked_job.status}'). Only completed reviews "
+                    "can be linked as prior context."
+                ),
+            )
+
     job = await api_repo.create_review_job(
         conn, body.version_id, body.persona_roles, body.context
     )
+
+    # Gap 1 — persist the review links junction rows.
+    if body.linked_review_ids:
+        await api_repo.insert_review_links(conn, job.id, body.linked_review_ids)
+        logger.info(
+            "[INFO] Linked %d prior review(s) to Review ID %s",
+            len(body.linked_review_ids), job.id,
+        )
 
     from contexta.api.config import load_api_config
     from contexta.api.pipeline_bridge import run_review_pipeline_task
