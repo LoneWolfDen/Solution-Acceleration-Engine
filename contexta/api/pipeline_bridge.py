@@ -49,21 +49,31 @@ async def _build_prior_intelligence(
     conn: aiosqlite.Connection,
     review_id: str,
 ) -> str:
-    """Extract RED/AMBER findings from linked reviews as structured context.
+    """Extract RED/AMBER findings from linked reviews as structured JSON context.
 
-    Gap 1 — Requirement 1.5: injects prior review findings into the prompt
-    so the LLM produces more informed outputs on repeat analyses.  Only
-    findings with confidence RED or AMBER are included to avoid noise.
+    Gap 1 — Requirement 1.5: injects prior review findings into the LLM prompt
+    as a JSON array of typed dictionaries so the model receives machine-readable,
+    structured historical context rather than opaque text lines.  Only findings
+    with confidence RED or AMBER are included to avoid noise.
+
+    Each finding dict carries:
+      - ``review_id``   — source review job ID for traceability
+      - ``dimension``   — the ReviewDimensionEnum value (e.g. "RISK")
+      - ``confidence``  — "RED" or "AMBER"
+      - ``summary``     — the finding's human-readable summary text
+      - ``citations``   — list of {file_path, excerpt} dicts (may be empty)
 
     Args:
         conn:       Open aiosqlite connection.
         review_id:  The new Review_Job whose review_links to traverse.
 
     Returns:
-        A formatted multi-line string delimited by ``--- PRIOR REVIEW
-        INTELLIGENCE ---`` markers, or an empty string when no linked reviews
-        exist or none have qualifying findings.
+        A formatted block delimited by ``--- PRIOR REVIEW INTELLIGENCE ---``
+        markers containing a JSON array, or an empty string when no linked
+        reviews exist or none have qualifying findings.
     """
+    import json as _json
+
     from . import repositories as _api_repo
     from ..db import repositories as _db_repo
 
@@ -71,7 +81,7 @@ async def _build_prior_intelligence(
     if not linked_ids:
         return ""
 
-    sections: list[str] = []
+    finding_dicts: list[dict] = []
     for lid in linked_ids:
         job = await _api_repo.get_review_job(conn, lid)
         if not job or not job.node_id:
@@ -86,17 +96,32 @@ async def _build_prior_intelligence(
 
         for payload in payloads:
             for f in payload.findings:
-                if f.confidence.value in ("RED", "AMBER"):
-                    sections.append(
-                        f"[{f.dimension.value}/{f.confidence.value}] {f.summary}"
-                    )
+                if f.confidence.value not in ("RED", "AMBER"):
+                    continue
+                citations = [
+                    {
+                        "file_path": c.file_path,
+                        "excerpt": c.excerpt,
+                    }
+                    for c in (f.citations or [])
+                ]
+                finding_dicts.append(
+                    {
+                        "review_id": lid,
+                        "dimension": f.dimension.value,
+                        "confidence": f.confidence.value,
+                        "summary": f.summary,
+                        "citations": citations,
+                    }
+                )
 
-    if not sections:
+    if not finding_dicts:
         return ""
 
+    structured_json = _json.dumps(finding_dicts, indent=2, ensure_ascii=False)
     return (
         "\n\n--- PRIOR REVIEW INTELLIGENCE ---\n"
-        + "\n".join(sections)
+        + structured_json
         + "\n--- END PRIOR REVIEW INTELLIGENCE ---\n"
     )
 
