@@ -173,6 +173,7 @@ class CreateReviewRequest(BaseModel):
     persona_roles: List[str]
     context: str = ""
     backend: Optional[str] = None  # "groq" | "openrouter" | "gemini" | "ollama"
+    linked_review_ids: List[str] = []  # Gap 1: prior reviews to include as context
 
 
 class CreateReviewResponse(BaseModel):
@@ -188,6 +189,19 @@ class ReviewStatusResponse(BaseModel):
     error: Optional[str] = None
 
 
+# ── Review Linking (Gap 1) ──────────────────────────────────────────────────────
+
+class LinkableReviewItem(BaseModel):
+    review_id: str
+    persona: str
+    run_date: str
+
+
+class LinkableReviewsResponse(BaseModel):
+    reviews: List[LinkableReviewItem]
+    error: Optional[str] = None
+
+
 # ── Proposals ──────────────────────────────────────────────────────────────────
 
 class CreateProposalRequest(BaseModel):
@@ -200,11 +214,144 @@ class CreateProposalResponse(BaseModel):
     error: Optional[str] = None
 
 
+class AdvisoryAlertItem(BaseModel):
+    """One alert emitted by the Proactive Advisor (Gap 4)."""
+    pattern: str
+    tag_combination: List[str]
+    frequency_count: int
+    advisory_text: str = ""
+
+
 class ProposalStatusResponse(BaseModel):
     proposal_id: str
     status: str
     progress_message: Optional[str] = None
     report: Optional[dict] = None
+    alerts: Optional[List[AdvisoryAlertItem]] = None  # Gap 4
+    error: Optional[str] = None
+
+
+# ── Version-level Proposals (Gap 2 + Gap 11) ────────────────────────────────────
+
+class CreateVersionProposalRequest(BaseModel):
+    """Body for POST /api/versions/{version_id}/proposals (Gap 2)."""
+    review_ids: List[str]
+
+
+class ProposalListItem(BaseModel):
+    proposal_id: str
+    status: str
+    created_at: str
+    progress_message: Optional[str] = None
+    linked_review_count: int
+
+
+class ProposalListResponse(BaseModel):
+    proposals: List[ProposalListItem]
+    error: Optional[str] = None
+
+
+# ── Acknowledge (Gap 4) ──────────────────────────────────────────────────────────
+
+class AcknowledgeResponse(BaseModel):
+    status: str
+    error: Optional[str] = None
+
+
+# ── Fork Node (Gap 3) ────────────────────────────────────────────────────────────
+
+class ForkNodeRequest(BaseModel):
+    name: str
+
+
+class ForkNodeResponse(BaseModel):
+    node_id: str
+    name: str
+    created_at: str
+    error: Optional[str] = None
+
+
+# ── Routing Decision (Gap 5) ─────────────────────────────────────────────────────
+
+class RoutingDecisionRequest(BaseModel):
+    finding_id: str
+    decision: str  # "risk_register" | "assumptions_matrix" | "scope_modification"
+    acknowledged: Optional[bool] = None
+
+
+class RoutingDecisionResponse(BaseModel):
+    status: str = "recorded"
+    error: Optional[str] = None
+
+
+# ── JSON Import (Gap 7) ──────────────────────────────────────────────────────────
+
+class ImportResponse(BaseModel):
+    node_id: str
+    status: str = "imported"
+    error: Optional[str] = None
+
+
+# ── Dream Cycle (Gap 8) ──────────────────────────────────────────────────────────
+
+class DreamCycleResponse(BaseModel):
+    job_id: str
+    status: str
+    error: Optional[str] = None
+
+
+class DreamCycleStatusResponse(BaseModel):
+    status: str
+    last_run: Optional[str] = None
+    error: Optional[str] = None
+
+
+# ── Blueprint Management (Gap 9) ─────────────────────────────────────────────────
+
+class BlueprintItem(BaseModel):
+    id: str
+    name: str
+    version_string: str
+    is_active: bool
+    prompt_preview: str  # first 200 chars of master_prompt_text
+
+
+class BlueprintListResponse(BaseModel):
+    blueprints: List[BlueprintItem]
+    error: Optional[str] = None
+
+
+class CreateBlueprintRequest(BaseModel):
+    name: str
+    version_string: str
+    prompt_text: str
+
+
+class BlueprintItemResponse(BaseModel):
+    id: str
+    name: str
+    version_string: str
+    is_active: bool
+    error: Optional[str] = None
+
+
+class ActivateResponse(BaseModel):
+    status: str = "activated"
+    error: Optional[str] = None
+
+
+# ── Global Client Insights (Gap 10) ─────────────────────────────────────────────
+
+class InsightItem(BaseModel):
+    id: str
+    client_or_industry_tag: str
+    observed_pattern: str
+    frequency_count: int
+    last_updated: str
+
+
+class InsightsResponse(BaseModel):
+    insights: List[InsightItem]
     error: Optional[str] = None
 
 

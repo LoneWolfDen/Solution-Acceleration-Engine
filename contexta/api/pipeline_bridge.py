@@ -42,6 +42,90 @@ class PipelineBridgeError(Exception):
     """Raised when the pipeline cannot be started (bad config, no blueprint)."""
 
 
+# ── Prior Review Intelligence (Gap 1) ─────────────────────────────────────────
+
+
+async def _build_prior_intelligence(
+    conn: aiosqlite.Connection,
+    review_id: str,
+) -> str:
+    """Extract RED/AMBER findings from linked reviews as structured JSON context.
+
+    Gap 1 — Requirement 1.5: injects prior review findings into the LLM prompt
+    as a JSON array of typed dictionaries so the model receives machine-readable,
+    structured historical context rather than opaque text lines.  Only findings
+    with confidence RED or AMBER are included to avoid noise.
+
+    Each finding dict carries:
+      - ``review_id``   — source review job ID for traceability
+      - ``dimension``   — the ReviewDimensionEnum value (e.g. "RISK")
+      - ``confidence``  — "RED" or "AMBER"
+      - ``summary``     — the finding's human-readable summary text
+      - ``citations``   — list of {file_path, excerpt} dicts (may be empty)
+
+    Args:
+        conn:       Open aiosqlite connection.
+        review_id:  The new Review_Job whose review_links to traverse.
+
+    Returns:
+        A formatted block delimited by ``--- PRIOR REVIEW INTELLIGENCE ---``
+        markers containing a JSON array, or an empty string when no linked
+        reviews exist or none have qualifying findings.
+    """
+    import json as _json
+
+    from . import repositories as _api_repo
+    from ..db import repositories as _db_repo
+
+    linked_ids = await _api_repo.get_linked_review_ids(conn, review_id)
+    if not linked_ids:
+        return ""
+
+    finding_dicts: list[dict] = []
+    for lid in linked_ids:
+        job = await _api_repo.get_review_job(conn, lid)
+        if not job or not job.node_id:
+            continue
+        node = await _db_repo.get_node(conn, job.node_id)
+        if not node:
+            continue
+        try:
+            payloads = _load_dimension_payloads(node)
+        except PipelineBridgeError:
+            continue
+
+        for payload in payloads:
+            for f in payload.findings:
+                if f.confidence.value not in ("RED", "AMBER"):
+                    continue
+                citations = [
+                    {
+                        "file_path": c.file_path,
+                        "excerpt": c.excerpt,
+                    }
+                    for c in (f.citations or [])
+                ]
+                finding_dicts.append(
+                    {
+                        "review_id": lid,
+                        "dimension": f.dimension.value,
+                        "confidence": f.confidence.value,
+                        "summary": f.summary,
+                        "citations": citations,
+                    }
+                )
+
+    if not finding_dicts:
+        return ""
+
+    structured_json = _json.dumps(finding_dicts, indent=2, ensure_ascii=False)
+    return (
+        "\n\n--- PRIOR REVIEW INTELLIGENCE ---\n"
+        + structured_json
+        + "\n--- END PRIOR REVIEW INTELLIGENCE ---\n"
+    )
+
+
 # ── LLM resolution ────────────────────────────────────────────────────────────
 
 # Maps an app_config provider key to a LiteLLM model identifier.  These are
@@ -249,6 +333,19 @@ async def run_review_pipeline_task(
             # schema_json=_json.dumps(ReviewNodePayload.model_json_schema()),
         )
 
+        # Gap 1 — inject Prior Review Intelligence from linked reviews.
+        prior_intelligence = await _build_prior_intelligence(conn, review_id)
+        if prior_intelligence:
+            # Append the prior findings block to the blueprint's master prompt
+            # text so every dimension runner sees the same historical context.
+            from ..models.payloads import ReviewNodePayload as _RNP  # local alias
+            original_prompt = blueprint.master_prompt_text
+            blueprint.master_prompt_text = original_prompt + prior_intelligence
+            logger.info(
+                "Injected prior review intelligence (%d chars) for review %s.",
+                len(prior_intelligence), review_id,
+            )
+
         async def _on_state_change(task) -> None:
             await api_repo.update_review_job_status(
                 conn, review_id, "running",
@@ -351,24 +448,120 @@ async def run_proposal_pipeline_task(proposal_id: str, db_path: str) -> None:
             conn, proposal_id, "running", progress_message="Preparing synthesis…"
         )
 
-        review_job = await api_repo.get_review_job(conn, job.review_job_id)
-        if review_job is None or not review_job.node_id:
+        # ── Gap 2: Multi-review proposal — load exploration nodes from all
+        # linked reviews via proposal_review_links (falls back to the legacy
+        # single-FK column when no junction rows exist).
+        linked_review_ids = await api_repo.get_linked_proposal_review_ids(
+            conn, proposal_id
+        )
+        if not linked_review_ids:
+            # Fallback for legacy proposals that pre-date the junction table.
+            linked_review_ids = [job.review_job_id] if job.review_job_id else []
+
+        # Collect the completed exploration nodes for each linked review.
+        exploration_nodes = []
+        for rid in linked_review_ids:
+            r_job = await api_repo.get_review_job(conn, rid)
+            if r_job is None or not r_job.node_id:
+                await api_repo.update_proposal_job_status(
+                    conn, proposal_id, "failed",
+                    progress_message=(
+                        f"Linked review '{rid}' has no completed exploration node."
+                    ),
+                )
+                return
+            node = await db_repo.get_node(conn, r_job.node_id)
+            if node is None:
+                await api_repo.update_proposal_job_status(
+                    conn, proposal_id, "failed",
+                    progress_message=f"Exploration node for review '{rid}' not found.",
+                )
+                return
+            exploration_nodes.append(node)
+
+        if not exploration_nodes:
             await api_repo.update_proposal_job_status(
                 conn, proposal_id, "failed",
-                progress_message="Source review has no completed exploration node.",
+                progress_message="No exploration nodes found for this proposal.",
             )
             return
 
-        exploration_node = await db_repo.get_node(conn, review_job.node_id)
-        if exploration_node is None:
-            await api_repo.update_proposal_job_status(
-                conn, proposal_id, "failed",
-                progress_message=f"Exploration node '{review_job.node_id}' not found.",
-            )
-            return
+        # Use the first node as the canonical anchor for project/version metadata.
+        exploration_node = exploration_nodes[0]
+
+        # ── Gap 4: Proactive Advisor evaluation ───────────────────────────────
+        # Check whether this run has already been acknowledged (re-queued
+        # after the user dismissed the alerts dialog).  If not, run the
+        # Proactive Advisor before proceeding to synthesis.
+        import json as _meta_json
 
         try:
-            payloads = _load_dimension_payloads(exploration_node)
+            metadata: dict = (
+                _meta_json.loads(job.metadata_json)
+                if job.metadata_json
+                else {}
+            )
+        except (ValueError, TypeError):
+            metadata = {}
+
+        already_acknowledged = bool(metadata.get("acknowledged_at"))
+
+        if not already_acknowledged:
+            from ..db import repositories as _db_repo_adv
+            from ..pipeline.advisor import ProactiveAdvisor
+
+            project = await _db_repo_adv.get_project(
+                conn, exploration_node.project_id
+            )
+            global_tags = project.global_tags if project else []
+
+            advisor = ProactiveAdvisor()
+            alerts = await advisor.evaluate(global_tags, conn)
+
+            if alerts:
+                # Serialise alerts into metadata and block synthesis.
+                alert_dicts = [
+                    {
+                        "pattern": a.pattern,
+                        "tag_combination": a.tag_combination,
+                        "frequency_count": a.frequency_count,
+                        "advisory_text": "",
+                    }
+                    for a in alerts
+                ]
+                metadata["alerts"] = alert_dicts
+                await conn.execute(
+                    "UPDATE proposal_jobs SET metadata_json = ? WHERE id = ?",
+                    (_meta_json.dumps(metadata), proposal_id),
+                )
+                await conn.commit()
+                await api_repo.update_proposal_job_status(
+                    conn,
+                    proposal_id,
+                    "awaiting_acknowledgement",
+                    progress_message=(
+                        f"Advisor detected {len(alerts)} high-risk pattern(s). "
+                        "Acknowledge before synthesis can proceed."
+                    ),
+                )
+                logger.info(
+                    "Proposal %s blocked — %d advisor alert(s) require acknowledgement.",
+                    proposal_id, len(alerts),
+                )
+                return
+
+        # Aggregate findings from ALL linked exploration nodes (Gap 2).
+        all_payloads: list[ReviewNodePayload] = []
+        for exp_node in exploration_nodes:
+            try:
+                all_payloads.extend(_load_dimension_payloads(exp_node))
+            except PipelineBridgeError as exc:
+                await api_repo.update_proposal_job_status(
+                    conn, proposal_id, "failed", progress_message=str(exc)
+                )
+                return
+
+        try:
             llm_config = await resolve_llm_config(conn)
         except PipelineBridgeError as exc:
             await api_repo.update_proposal_job_status(
@@ -376,7 +569,7 @@ async def run_proposal_pipeline_task(proposal_id: str, db_path: str) -> None:
             )
             return
 
-        findings = [f for payload in payloads for f in payload.findings]
+        findings = [f for payload in all_payloads for f in payload.findings]
 
         engine = LayerTwoArbitrator(config=_LLMConfigAdapter(llm_config))
         try:

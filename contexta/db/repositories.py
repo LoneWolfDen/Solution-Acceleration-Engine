@@ -379,16 +379,21 @@ async def fork_node(
     """
     Create a new node branched from an existing node.
 
-    The fork inherits project_id and layer_type from the parent.  Its
-    content_markdown and metadata_json start empty — the fork represents a
-    fresh review state, not a copy of the parent's findings.
+    The fork inherits ``project_id``, ``layer_type``, and ``version_id`` from
+    the parent.  If *version_id* is explicitly provided it overrides the
+    inherited value — this allows callers to place the fork into a different
+    version when needed.  ``content_markdown`` and ``metadata_json`` start
+    empty: the fork represents a fresh review state, not a copy of the
+    parent's findings.
 
     Args:
         conn:           Open aiosqlite connection.
         parent_node_id: id of the node to branch from.
         new_node_name:  Name for the forked node.
         version_tag:    Optional legacy version label string.
-        version_id:     Optional FK → versions.id for the forked node.
+        version_id:     Optional FK → versions.id.  When omitted, the
+                        parent's ``version_id`` is inherited automatically
+                        (satisfies Gap 3 Property 6 requirement).
 
     Returns:
         The newly created NodeRow.
@@ -399,6 +404,9 @@ async def fork_node(
     parent = await get_node(conn, parent_node_id)
     if parent is None:
         raise ValueError(f"Parent node '{parent_node_id}' not found.")
+
+    # Inherit version_id from parent when not explicitly overridden by caller.
+    effective_version_id = version_id if version_id is not None else parent.version_id
 
     row_id = _new_id()
     now = _now_iso()
@@ -418,7 +426,7 @@ async def fork_node(
             new_node_name,
             now,
             version_tag,
-            version_id,
+            effective_version_id,
         ),
     )
     await conn.commit()
@@ -433,7 +441,7 @@ async def fork_node(
         content_markdown="",
         created_at=now,
         version_tag=version_tag,
-        version_id=version_id,
+        version_id=effective_version_id,
     )
 
 

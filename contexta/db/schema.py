@@ -32,7 +32,12 @@ logger = logging.getLogger(__name__)
 # v3 → v4: Added ``reviews`` and ``knowledge_observations`` tables for Knowledge Memory.
 # v4 → v5: Added web-API tables: artifacts, artifact_version_links,
 #           review_jobs, proposal_jobs, app_config.
-SCHEMA_VERSION = 5
+# v5 → v6: Added ``review_links`` (M:N prior-review context junction) and
+#           ``proposal_review_links`` (M:N proposal→review junction).
+#           Data migration: existing proposal_jobs.review_job_id values are
+#           copied into proposal_review_links before the column is retained for
+#           backward compatibility.
+SCHEMA_VERSION = 6
 
 # All DDL statements executed in order during migration.
 # CREATE TABLE IF NOT EXISTS ensures idempotency on re-runs.
@@ -245,6 +250,38 @@ DDL_STATEMENTS: list[str] = [
         timestamp     TEXT NOT NULL
     )
     """,
+
+    # ── Review Links (v6) ─────────────────────────────────────────────────────
+    # M:N junction table — which prior completed reviews provide context for a
+    # new review run (Gap 1: Prior Review Intelligence).
+    #
+    # Composite PK on (review_job_id, linked_review_id) prevents duplicate links.
+    # CHECK constraint prevents self-links.
+    # Both FK columns reference review_jobs.id.
+    """
+    CREATE TABLE IF NOT EXISTS review_links (
+        review_job_id    TEXT NOT NULL REFERENCES review_jobs(id),
+        linked_review_id TEXT NOT NULL REFERENCES review_jobs(id),
+        PRIMARY KEY (review_job_id, linked_review_id),
+        CHECK(review_job_id != linked_review_id)
+    )
+    """,
+
+    # ── Proposal Review Links (v6) ────────────────────────────────────────────
+    # M:N junction table — which completed review jobs feed a given proposal
+    # synthesis run (Gap 2: Multi-Review Proposal Re-Architecture).
+    #
+    # Composite PK on (proposal_job_id, review_job_id).
+    # proposal_jobs.review_job_id is RETAINED for backward compatibility with
+    # any existing code that reads the single-FK column; this junction table is
+    # the canonical source of truth for multi-review proposals.
+    """
+    CREATE TABLE IF NOT EXISTS proposal_review_links (
+        proposal_job_id TEXT NOT NULL REFERENCES proposal_jobs(id),
+        review_job_id   TEXT NOT NULL REFERENCES review_jobs(id),
+        PRIMARY KEY (proposal_job_id, review_job_id)
+    )
+    """,
 ]
 
 
@@ -311,6 +348,29 @@ async def run_migrations(conn: "aiosqlite.Connection") -> None:
         # Web-API tables (artifacts, artifact_version_links, review_jobs,
         # proposal_jobs, app_config) are entirely new tables.
         # Handled idempotently by step 1. Nothing extra to do here.
+
+        # ── v5 → v6 ──────────────────────────────────────────────────────────
+        # Two new M:N junction tables (review_links, proposal_review_links)
+        # are created idempotently by step 1 above.
+        #
+        # Data migration: copy any existing 1:1 proposal→review links that are
+        # stored in proposal_jobs.review_job_id into the new junction table so
+        # that all downstream queries can rely solely on proposal_review_links.
+        # INSERT OR IGNORE is safe to re-run; duplicate inserts are silently
+        # skipped, preserving idempotency on repeated startups.
+        if stored_version < 6:
+            await conn.execute(
+                """
+                INSERT OR IGNORE INTO proposal_review_links (proposal_job_id, review_job_id)
+                SELECT id, review_job_id
+                FROM proposal_jobs
+                WHERE review_job_id IS NOT NULL
+                """
+            )
+            logger.info(
+                "v5→v6 data migration: proposal_jobs.review_job_id values "
+                "copied into proposal_review_links."
+            )
 
         # ── Record new schema version ─────────────────────────────────────────
         if stored_version == 0:
