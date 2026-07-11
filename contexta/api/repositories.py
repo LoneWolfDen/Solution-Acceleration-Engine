@@ -58,8 +58,41 @@ class ProposalJobRow:
     status: str = "queued"
     progress_message: Optional[str] = None
     node_id: Optional[str] = None
+    metadata_json: str = "{}"
     created_at: str = ""
     updated_at: str = ""
+
+
+@dataclass
+class ReviewLinkRow:
+    """One row in the review_links junction table (Gap 1)."""
+    review_job_id: str
+    linked_review_id: str
+
+
+@dataclass
+class ProposalReviewLinkRow:
+    """One row in the proposal_review_links junction table (Gap 2)."""
+    proposal_job_id: str
+    review_job_id: str
+
+
+@dataclass
+class LinkableReviewItem:
+    """A completed review job eligible to be linked as prior context."""
+    review_id: str
+    persona: str
+    run_date: str
+
+
+@dataclass
+class ProposalListItem:
+    """Summary row returned by list_proposals_for_version."""
+    proposal_id: str
+    status: str
+    created_at: str
+    progress_message: Optional[str]
+    linked_review_count: int
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -105,12 +138,17 @@ def _row_to_review_job(row: aiosqlite.Row) -> ReviewJobRow:
 
 
 def _row_to_proposal_job(row: aiosqlite.Row) -> ProposalJobRow:
+    try:
+        metadata_json = row["metadata_json"] or "{}"
+    except (IndexError, KeyError):
+        metadata_json = "{}"
     return ProposalJobRow(
         id=row["id"],
         review_job_id=row["review_job_id"],
         status=row["status"],
         progress_message=row["progress_message"],
         node_id=row["node_id"],
+        metadata_json=metadata_json,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -480,3 +518,209 @@ async def get_project_stats(
         "review_count": review_count,
         "storage_bytes": node_bytes + artifact_bytes,
     }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Review Links  (Gap 1 — v6 junction table)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def insert_review_links(
+    conn: aiosqlite.Connection,
+    review_job_id: str,
+    linked_ids: List[str],
+) -> None:
+    """Bulk-insert rows into ``review_links`` for a newly created review job.
+
+    Each ID in *linked_ids* becomes one (review_job_id, linked_review_id) row.
+    ``INSERT OR IGNORE`` is used so callers can safely retry without creating
+    duplicate rows.
+
+    Args:
+        conn:           Open aiosqlite connection.
+        review_job_id:  The new Review_Job whose context links are being stored.
+        linked_ids:     IDs of prior completed Review_Jobs to link as context.
+    """
+    if not linked_ids:
+        return
+    for linked_id in linked_ids:
+        await conn.execute(
+            "INSERT OR IGNORE INTO review_links (review_job_id, linked_review_id) VALUES (?, ?)",
+            (review_job_id, linked_id),
+        )
+    await conn.commit()
+
+
+async def get_linked_review_ids(
+    conn: aiosqlite.Connection,
+    review_job_id: str,
+) -> List[str]:
+    """Return all linked_review_id values for a given review job.
+
+    Args:
+        conn:           Open aiosqlite connection.
+        review_job_id:  FK → review_jobs.id whose links to retrieve.
+
+    Returns:
+        List of linked review job IDs.  Empty list if none are linked.
+    """
+    cursor = await conn.execute(
+        "SELECT linked_review_id FROM review_links WHERE review_job_id = ?",
+        (review_job_id,),
+    )
+    rows = await cursor.fetchall()
+    return [row["linked_review_id"] for row in rows]
+
+
+async def list_linkable_reviews(
+    conn: aiosqlite.Connection,
+    version_id: str,
+) -> List[LinkableReviewItem]:
+    """Return all completed Review_Jobs for *version_id* eligible for linking.
+
+    Only jobs with ``status = 'complete'`` are returned — in-flight or failed
+    jobs cannot contribute Prior Review Intelligence.
+
+    Args:
+        conn:       Open aiosqlite connection.
+        version_id: FK → versions.id to filter on.
+
+    Returns:
+        List of :class:`LinkableReviewItem` ordered by creation date.
+    """
+    cursor = await conn.execute(
+        """
+        SELECT id, persona_roles, created_at
+        FROM review_jobs
+        WHERE version_id = ? AND status = 'complete'
+        ORDER BY created_at
+        """,
+        (version_id,),
+    )
+    rows = await cursor.fetchall()
+    items: List[LinkableReviewItem] = []
+    for row in rows:
+        # Extract first persona role as the display label; fall back to "unknown".
+        roles = json.loads(row["persona_roles"] or "[]")
+        persona = roles[0] if roles else "unknown"
+        items.append(
+            LinkableReviewItem(
+                review_id=row["id"],
+                persona=persona,
+                run_date=row["created_at"],
+            )
+        )
+    return items
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Proposal Review Links  (Gap 2 — v6 junction table)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def insert_proposal_review_links(
+    conn: aiosqlite.Connection,
+    proposal_job_id: str,
+    review_ids: List[str],
+) -> None:
+    """Bulk-insert rows into ``proposal_review_links`` for a new proposal job.
+
+    Each ID in *review_ids* becomes one (proposal_job_id, review_job_id) row.
+    ``INSERT OR IGNORE`` ensures idempotency.
+
+    Args:
+        conn:             Open aiosqlite connection.
+        proposal_job_id:  FK → proposal_jobs.id of the new proposal.
+        review_ids:       IDs of completed Review_Jobs feeding this proposal.
+    """
+    if not review_ids:
+        return
+    for review_id in review_ids:
+        await conn.execute(
+            "INSERT OR IGNORE INTO proposal_review_links (proposal_job_id, review_job_id) VALUES (?, ?)",
+            (proposal_job_id, review_id),
+        )
+    await conn.commit()
+
+
+async def list_proposals_for_version(
+    conn: aiosqlite.Connection,
+    version_id: str,
+) -> List[ProposalListItem]:
+    """Return all Proposal_Jobs whose linked reviews belong to *version_id*.
+
+    Joins ``proposal_review_links`` → ``review_jobs`` to filter by version,
+    then groups to deduplicate proposals that link multiple reviews and to
+    count the number of linked reviews per proposal.
+
+    Args:
+        conn:       Open aiosqlite connection.
+        version_id: FK → versions.id to filter on.
+
+    Returns:
+        List of :class:`ProposalListItem` ordered by proposal creation date.
+        Empty list if no proposals exist for this version.
+    """
+    cursor = await conn.execute(
+        """
+        SELECT
+            pj.id               AS proposal_id,
+            pj.status           AS status,
+            pj.created_at       AS created_at,
+            pj.progress_message AS progress_message,
+            COUNT(prl.review_job_id) AS linked_review_count
+        FROM proposal_jobs pj
+        JOIN proposal_review_links prl ON prl.proposal_job_id = pj.id
+        JOIN review_jobs rj ON rj.id = prl.review_job_id
+        WHERE rj.version_id = ?
+        GROUP BY pj.id
+        ORDER BY pj.created_at
+        """,
+        (version_id,),
+    )
+    rows = await cursor.fetchall()
+    return [
+        ProposalListItem(
+            proposal_id=row["proposal_id"],
+            status=row["status"],
+            created_at=row["created_at"],
+            progress_message=row["progress_message"],
+            linked_review_count=row["linked_review_count"],
+        )
+        for row in rows
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Node metadata patch  (Gap 5 — routing decisions; Gap 4 — advisor alerts)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def update_node_metadata(
+    conn: aiosqlite.Connection,
+    node_id: str,
+    metadata_json: str,
+) -> None:
+    """Patch the ``metadata_json`` column on a node row in-place.
+
+    Callers are responsible for reading the current metadata (via
+    ``db_repo.get_node``), merging their changes into it, serialising to a
+    JSON string, then calling this function to persist.
+
+    Args:
+        conn:          Open aiosqlite connection.
+        node_id:       PK of the node row to update.
+        metadata_json: Fully serialised JSON string to write into the column.
+
+    Raises:
+        ValueError: if *node_id* does not exist in the ``nodes`` table.
+    """
+    # Confirm the row exists before writing to avoid silent no-ops.
+    cursor = await conn.execute(
+        "SELECT id FROM nodes WHERE id = ?", (node_id,)
+    )
+    if await cursor.fetchone() is None:
+        raise ValueError(f"Node '{node_id}' not found.")
+
+    await conn.execute(
+        "UPDATE nodes SET metadata_json = ? WHERE id = ?",
+        (metadata_json, node_id),
+    )
+    await conn.commit()
