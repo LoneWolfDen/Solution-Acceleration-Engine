@@ -4,6 +4,11 @@ web/pages/admin.py — AdminDashboardPage (Milestone 3).
 All dict access uses bracket notation (not .get()) for Reflex Var safety.
 admin_config and admin_health are initialised with safe defaults in AppState
 so bracket access is always valid.
+
+Gap 7: JSON Import panel
+Gap 8: Dream Cycle panel  
+Gap 9: Blueprint Management panel
+Gap 10: Insights sidebar
 """
 
 import reflex as rx
@@ -245,6 +250,310 @@ def _projects_section() -> rx.Component:
     )
 
 
+# ── Gap 7: JSON Import ────────────────────────────────────────────────────────
+
+def _import_section() -> rx.Component:
+    return _section_card(
+        "Import JSON Packet",
+        rx.call(lambda: AppState.fetch_blueprints()),  # Ensure blueprints are loaded
+        rx.box(
+            rx.upload(
+                rx.cond(
+                    rx.selected_files,
+                    rx.text(rx.selected_files()[0], size="2", weight="medium"),
+                    rx.vstack(
+                        rx.icon("upload", size=32, color="var(--accent-9)"),
+                        rx.text("Click or drag JSON file", size="2", color_scheme="gray"),
+                    ),
+                ),
+                id="admin_import_upload",
+                border="2px dashed var(--gray-5)",
+                border_radius="8px",
+                padding="2rem",
+                width="100%",
+            ),
+            rx.button(
+                "Upload",
+                size="2",
+                variant="soft",
+                color_scheme="indigo",
+                width="100%",
+                disabled=~rx.selected_files,
+                on_click=AppState.handle_import(
+                    rx.selected_files(),
+                    rx.selected_files()[0],
+                ),
+            ),
+            spacing="3",
+            align="start",
+            width="100%",
+        ),
+    )
+
+
+# ── Gap 8: Dream Cycle ────────────────────────────────────────────────────────
+
+def _dream_cycle_section() -> rx.Component:
+    return _section_card(
+        "Dream Cycle Analysis",
+        rx.call(lambda: AppState.fetch_dream_cycle_status()),
+        rx.cond(
+            AppState.dream_cycle_status == "running",
+            rx.vstack(
+                rx.hstack(
+                    rx.icon("loader", size=16, animation="rotate"),
+                    rx.text("Running...", size="2"),
+                    spacing="2",
+                    align="center",
+                ),
+                rx.text(
+                    "Analyzing database patterns...",
+                    size="1",
+                    color_scheme="gray",
+                ),
+            ),
+            rx.cond(
+                AppState.dream_cycle_status == "complete",
+                rx.vstack(
+                    rx.hstack(
+                        rx.icon("circle-check", size=16, color="var(--green-9)"),
+                        rx.text("Completed", size="2", color_scheme="green"),
+                        spacing="2",
+                        align="center",
+                    ),
+                    rx.text(
+                        f"Last run: {AppState.dream_cycle_last_run[:10]}",
+                        size="1",
+                        color_scheme="gray",
+                    ),
+                ),
+                rx.cond(
+                    AppState.dream_cycle_status == "failed",
+                    rx.vstack(
+                        rx.hstack(
+                            rx.icon("alert-circle", size=16, color="var(--red-9)"),
+                            rx.text("Failed", size="2", color_scheme="red"),
+                            spacing="2",
+                            align="center",
+                        ),
+                        rx.text(
+                            AppState.dream_cycle_error,
+                            size="1",
+                            color_scheme="gray",
+                        ),
+                    ),
+                    rx.vstack(
+                        rx.hstack(
+                            rx.icon("circle-x", size=16, color="var(--gray-9)"),
+                            rx.text("Idle", size="2"),
+                            spacing="2",
+                            align="center",
+                        ),
+                        rx.text(
+                            "No runs yet.",
+                            size="1",
+                            color_scheme="gray",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        rx.button(
+            rx.cond(
+                AppState.dream_cycle_status == "running",
+                rx.spinner(size="2"),
+                rx.icon("play", size=14),
+            ),
+            rx.cond(
+                AppState.dream_cycle_status == "running",
+                "Running...",
+                "Run Dream Cycle",
+            ),
+            width="100%",
+            size="2",
+            variant="soft",
+            color_scheme="indigo",
+            disabled=AppState.dream_cycle_status == "running",
+            on_click=AppState.trigger_dream_cycle,
+        ),
+    )
+
+
+# ── Gap 9: Blueprint Management ───────────────────────────────────────────────
+
+def _blueprint_section() -> rx.Component:
+    return _section_card(
+        "Prompt Blueprints",
+        rx.call(lambda: AppState.fetch_blueprints()),
+        # Create form
+        rx.box(
+            rx.vstack(
+                rx.text("Create New Blueprint", size="1", weight="medium", color_scheme="gray"),
+                rx.input(
+                    placeholder="Blueprint Name",
+                    id="blueprint_name_input",
+                    size="2",
+                ),
+                rx.input(
+                    placeholder="Version String (e.g., v1.0)",
+                    id="blueprint_version_input",
+                    size="2",
+                ),
+                rx.text_area(
+                    placeholder="Prompt Text",
+                    id="blueprint_prompt_input",
+                    rows="5",
+                    size="2",
+                ),
+                rx.button(
+                    "Create Blueprint",
+                    size="2",
+                    variant="soft",
+                    color_scheme="indigo",
+                    width="100%",
+                    on_click=AppState.create_blueprint(
+                        rx.call_script("document.getElementById('blueprint_name_input').value"),
+                        rx.call_script("document.getElementById('blueprint_version_input').value"),
+                        rx.call_script("document.getElementById('blueprint_prompt_input').value"),
+                    ),
+                ),
+                spacing="2",
+                width="100%",
+            ),
+            padding="1rem",
+            background="var(--gray-2)",
+            border="1px solid var(--gray-4)",
+            border_radius="8px",
+            width="100%",
+        ),
+        rx.divider(width="100%"),
+        # Blueprint list
+        rx.box(
+            rx.cond(
+                AppState.admin_blueprints.length() > 0,
+                rx.table.root(
+                    rx.table.header(
+                        rx.table.row(
+                            rx.table.column_header_cell("Name"),
+                            rx.table.column_header_cell("Version"),
+                            rx.table.column_header_cell("Status"),
+                            rx.table.column_header_cell("Actions"),
+                        ),
+                    ),
+                    rx.table.body(
+                        rx.foreach(
+                            AppState.admin_blueprints,
+                            lambda bp: rx.tr(
+                                rx.td(bp["name"], size="2", weight="medium"),
+                                rx.td(bp["version_string"], size="2", color_scheme="gray"),
+                                rx.td(
+                                    rx.cond(
+                                        bp["is_active"],
+                                        rx.badge("Active", color_scheme="green", variant="soft", size="1"),
+                                        rx.badge("Inactive", color_scheme="gray", variant="soft", size="1"),
+                                    ),
+                                ),
+                                rx.td(
+                                    rx.cond(
+                                        bp["is_active"],
+                                        rx.text("", width="0"),
+                                        rx.button(
+                                            "Activate",
+                                            size="1",
+                                            variant="soft",
+                                            color_scheme="indigo",
+                                            on_click=AppState.activate_blueprint(bp["id"]),
+                                        ),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                    variant="surface",
+                    width="100%",
+                ),
+                rx.text(
+                    "No blueprints yet.",
+                    size="2",
+                    color_scheme="gray",
+                ),
+            ),
+            width="100%",
+        ),
+    )
+
+
+# ── Gap 10: Insights Sidebar ──────────────────────────────────────────────────
+
+def _insights_section() -> rx.Component:
+    return _section_card(
+        "Advisory Insights",
+        rx.call(lambda: AppState.fetch_insights()),
+        rx.cond(
+            AppState.insights.length() > 0,
+            rx.vstack(
+                rx.foreach(
+                    AppState.insights,
+                    lambda i: rx.box(
+                        rx.vstack(
+                            rx.hstack(
+                                rx.badge(
+                                    i["client_or_industry_tag"],
+                                    color_scheme="blue",
+                                    variant="soft",
+                                    size="1",
+                                ),
+                                rx.spacer(),
+                                rx.icon("trending-up", size=14, color="var(--gray-9)"),
+                                spacing="2",
+                                align="center",
+                                width="100%",
+                            ),
+                            rx.text(
+                                i["observed_pattern"],
+                                size="2",
+                                weight="medium",
+                                color_scheme="gray",
+                            ),
+                            rx.hstack(
+                                rx.text("Frequency:", size="1", color_scheme="gray"),
+                                rx.text(
+                                    i["frequency_count"],
+                                    size="1",
+                                    weight="bold",
+                                    color_scheme="indigo",
+                                ),
+                                rx.text(
+                                    f"Updated: {i['last_updated'][:10]}",
+                                    size="1",
+                                    color_scheme="gray",
+                                ),
+                                spacing="2",
+                                align="center",
+                            ),
+                            spacing="2",
+                            align="start",
+                            width="100%",
+                        ),
+                        padding="0.75rem",
+                        background="var(--gray-2)",
+                        border="1px solid var(--gray-4)",
+                        border_radius="6px",
+                        width="100%",
+                    ),
+                ),
+                spacing="2",
+                width="100%",
+            ),
+            rx.text(
+                "No insights available yet.",
+                size="2",
+                color_scheme="gray",
+            ),
+        ),
+    )
+
+
 # ── Page ──────────────────────────────────────────────────────────────────────
 
 @rx.page(route="/admin", on_load=AppState.load_admin_page, title="Admin — SAE")
@@ -295,6 +604,11 @@ def admin_page() -> rx.Component:
                             _llm_config_section(),
                             _thresholds_section(),
                             _projects_section(),
+                            rx.divider(width="100%"),
+                            _import_section(),
+                            _dream_cycle_section(),
+                            _blueprint_section(),
+                            _insights_section(),
                             spacing="5",
                             align="start",
                             width="100%",

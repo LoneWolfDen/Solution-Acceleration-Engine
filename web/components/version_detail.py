@@ -156,6 +156,32 @@ def _section_label(icon_name: str, label: str) -> rx.Component:
     )
 
 
+def _action_bar() -> rx.Component:
+    """Action buttons for the version detail page."""
+    return rx.hstack(
+        rx.link(
+            rx.button(
+                rx.icon("play", size=13),
+                "Run Review",
+                size="2",
+                variant="soft",
+                color_scheme="indigo",
+            ),
+            href="/run-review/" + AppState.selected_version["id"].to(str),
+        ),
+        rx.button(
+            rx.icon("share-2", size=13),
+            "Export JSON",
+            size="2",
+            variant="soft",
+            color_scheme="gray",
+            on_click=AppState.export_node(AppState.selected_node_id),
+        ),
+        spacing="2",
+        width="100%",
+    )
+
+
 def version_detail() -> rx.Component:
     version = AppState.current_version
     return rx.box(
@@ -178,16 +204,20 @@ def version_detail() -> rx.Component:
                             align="start",
                             flex="1",
                         ),
-                        rx.link(
-                            rx.button(
-                                rx.icon("play", size=13),
-                                "Run Review",
-                                size="1",
-                                variant="soft",
-                                color_scheme="indigo",
+                        rx.cond(
+                            AppState.selected_node_id,
+                            _action_bar(),
+                            rx.link(
+                                rx.button(
+                                    rx.icon("play", size=13),
+                                    "Run Review",
+                                    size="1",
+                                    variant="soft",
+                                    color_scheme="indigo",
+                                ),
+                                href="/run-review/" + version["id"].to(str),
+                                flex_shrink="0",
                             ),
-                            href="/run-review/" + version["id"].to(str),
-                            flex_shrink="0",
                         ),
                         spacing="3",
                         align="center",

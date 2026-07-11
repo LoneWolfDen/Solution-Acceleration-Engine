@@ -8,6 +8,9 @@ free-text context, then triggers POST /api/reviews via AppState.submit_run_revie
 Persona roles are a static list (not sourced from the API); the backend
 selector is populated from AppState.run_review_available_backends, which
 reads the admin config providers loaded via AppState.load_admin_page.
+
+Gap 1: Review Linking — linkable reviews selector is shown below persona selection.
+Gap 2/11: Proposal creation is available on the version detail page.
 """
 
 import reflex as rx
@@ -127,6 +130,40 @@ def run_review_page() -> rx.Component:
                     spacing="2",
                     width="100%",
                 ),
+                # Gap 1: Linkable reviews selector
+                rx.cond(
+                    AppState.selected_version_id != "",
+                    rx.vstack(
+                        rx.text("Prior Reviews (Optional)", size="2", weight="medium"),
+                        rx.call(
+                            lambda: AppState.fetch_linkable_reviews(AppState.selected_version_id)
+                        ),
+                        rx.foreach(
+                            AppState.linkable_reviews,
+                            lambda review: rx.badge(
+                                rx.hstack(
+                                    rx.text(review["persona"], size="1", weight="medium"),
+                                    rx.text("•", size="1"),
+                                    rx.text(review["run_date"][:10], size="1", color_scheme="gray"),
+                                    spacing="1",
+                                    align="center",
+                                ),
+                                variant="solid",
+                                color_scheme=rx.cond(
+                                    AppState.selected_linked_review_ids.contains(review["review_id"]),
+                                    "indigo",
+                                    "gray",
+                                ),
+                                size="2",
+                                cursor="pointer",
+                                on_click=AppState.toggle_linked_review(review["review_id"]),
+                            ),
+                        ),
+                        spacing="2",
+                        width="100%",
+                    ),
+                    rx.text("", width="0"),
+                ),
                 _backend_selector(),
                 _context_textarea(),
                 rx.button(
@@ -144,7 +181,12 @@ def run_review_page() -> rx.Component:
                     size="3",
                     width="100%",
                     disabled=~AppState.run_review_can_submit,
-                    on_click=AppState.submit_run_review,
+                    on_click=AppState.submit_review_with_links(
+                        AppState.selected_version_id,
+                        AppState.run_review_selected_personas,
+                        AppState.run_review_context,
+                        AppState.run_review_backend,
+                    ),
                 ),
                 spacing="5",
                 align="start",

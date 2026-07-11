@@ -123,6 +123,12 @@ class AppState(rx.State):
     active_proposal_progress_message: str = ""
     proposal_poll_active: bool = False
 
+    # ── Admin Gap 9: Blueprints State ───────────────────────────────────────────
+    admin_blueprints: list[dict] = []
+
+    # ── Admin Gap 10: Insights State ────────────────────────────────────────────
+    insights: list[dict] = []
+
     # ── Computed vars ─────────────────────────────────────────────────────────
 
     @rx.var(cache=True)
@@ -238,6 +244,39 @@ class AppState(rx.State):
     @rx.var(cache=True)
     def current_proposal_report(self) -> dict:
         return self.current_proposal.get("report") or {}
+
+    # ── Gap 1: Review Linking State ─────────────────────────────────────────────
+
+    linkable_reviews: list[dict] = []
+    selected_linked_review_ids: list[str] = []
+    _version_proposals: list[dict] = []  # Internal storage for version proposals
+
+    @rx.var(cache=True)
+    def version_proposals(self) -> list[dict]:
+        """Proposals for the current version (Gap 2/11)."""
+        return self._version_proposals
+
+    # ── Gap 4: Advisor Alerts ───────────────────────────────────────────────────
+
+    active_proposal_alerts: list[dict] = []
+
+    @rx.var(cache=True)
+    def active_proposal_requires_acknowledgement(self) -> bool:
+        """Check if current proposal needs advisor acknowledgement (Gap 4)."""
+        return self.active_proposal_status == "awaiting_acknowledgement"
+
+    # ── Admin Gap 8: Dream Cycle State ──────────────────────────────────────────
+
+    dream_cycle_status: str = "idle"
+    dream_cycle_last_run: str = ""
+    dream_cycle_error: str = ""
+    dream_cycle_is_running: bool = False
+
+    # ── Gap 5: Scope Policy Routing State ───────────────────────────────────────
+
+    _routing_decision_value: str = ""
+    _routing_decision_acknowledged: bool = False
+    _routing_edit_mode: bool = False
 
     # ── Admin typed accessors ─────────────────────────────────────────────────
     # admin_health and admin_config are plain dict vars, so deep subscript access
@@ -1025,6 +1064,369 @@ class AppState(rx.State):
                 )
             else:
                 self.set_toast("Proposal ready.", is_error=False)
+
+    # ── Gap 1: Review Linking ───────────────────────────────────────────────────
+
+    async def fetch_linkable_reviews(self, version_id: str) -> None:
+        """Fetch completed reviews eligible for linking (Gap 1)."""
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.get(
+                    f"{_API_BASE}/api/versions/{version_id}/reviews/linkable"
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                reviews = data.get("reviews", [])
+                self.linkable_reviews = [
+                    {"review_id": r["review_id"], "persona": r["persona"], "run_date": r["run_date"]}
+                    for r in reviews
+                ]
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+
+    def toggle_linked_review(self, review_id: str) -> None:
+        """Toggle a review in the linked reviews list."""
+        if review_id in self.selected_linked_review_ids:
+            self.selected_linked_review_ids = [
+                rid for rid in self.selected_linked_review_ids if rid != review_id
+            ]
+        else:
+            self.selected_linked_review_ids = [
+                *self.selected_linked_review_ids, review_id
+            ]
+
+    async def submit_review_with_links(self, version_id: str, persona_roles: list[str], context: str, backend: str = None) -> None:
+        """POST /api/reviews with linked_review_ids (Gap 1)."""
+        if not persona_roles:
+            self.set_toast("Select at least one persona role.", is_error=True)
+            return
+        self.run_review_is_submitting = True
+        yield
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.post(
+                    f"{_API_BASE}/api/reviews",
+                    json={
+                        "version_id": version_id,
+                        "persona_roles": persona_roles,
+                        "context": context,
+                        "backend": backend or None,
+                        "linked_review_ids": self.selected_linked_review_ids,
+                    },
+                )
+                resp.raise_for_status()
+                review_id = resp.json().get("review_id", "")
+                self.set_toast("Review queued.", is_error=False)
+                self.run_review_is_submitting = False
+                self.selected_project_id = ""  # force sidebar to re-expand on nav
+                yield AppState.start_review_status_poll(review_id, version_id)
+                yield rx.redirect("/")
+                return
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+        self.run_review_is_submitting = False
+
+    # ── Gap 2 & 11: Version-level Proposals ─────────────────────────────────────
+
+    async def fetch_proposals_for_version(self, version_id: str) -> None:
+        """Fetch proposals for a version (Gap 2/11)."""
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.get(
+                    f"{_API_BASE}/api/versions/{version_id}/proposals"
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                proposals = data.get("proposals", [])
+                self._version_proposals = [
+                    {
+                        "proposal_id": p["proposal_id"],
+                        "status": p["status"],
+                        "created_at": p["created_at"],
+                        "progress_message": p.get("progress_message"),
+                        "linked_review_count": p.get("linked_review_count", 0),
+                    }
+                    for p in proposals
+                ]
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+
+    def get_version_proposal_status(self, proposal_id: str) -> str:
+        """Get proposal status from _version_proposals (for computed vars)."""
+        for p in getattr(self, "_version_proposals", []):
+            if p["proposal_id"] == proposal_id:
+                return p["status"]
+        return "unknown"
+
+    async def submit_version_proposal(self, version_id: str, review_ids: list[str]) -> None:
+        """POST /api/versions/{version_id}/proposals (Gap 2)."""
+        if not review_ids:
+            self.set_toast("Select at least one review.", is_error=True)
+            return
+        self.is_loading = True
+        yield
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.post(
+                    f"{_API_BASE}/api/versions/{version_id}/proposals",
+                    json={"review_ids": review_ids},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                proposal_id = data.get("proposal_id", "")
+                self.set_toast("Proposal generation queued.", is_error=False)
+                # Refresh proposals list
+                await self.fetch_proposals_for_version(version_id)
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+        self.is_loading = False
+
+    # ── Gap 3: Fork Node ────────────────────────────────────────────────────────
+
+    async def fork_node(self, node_id: str, name: str) -> None:
+        """POST /api/nodes/{node_id}/fork (Gap 3)."""
+        self.is_loading = True
+        yield
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.post(
+                    f"{_API_BASE}/api/nodes/{node_id}/fork",
+                    json={"name": name},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                new_node_id = data.get("node_id", "")
+                self.set_toast("Node forked successfully.", is_error=False)
+                # Navigate to the new node
+                yield AppState.select_node(new_node_id)
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+        self.is_loading = False
+
+    # ── Gap 3: Fork Dialog State ────────────────────────────────────────────────
+
+    _fork_name: str = ""
+    _fork_dialog_open: bool = False
+
+    def open_fork_dialog(self) -> None:
+        self._fork_name = ""
+        self._fork_dialog_open = True
+
+    def set_fork_name(self, name: str) -> None:
+        self._fork_name = name
+
+    def close_fork_dialog(self) -> None:
+        self._fork_dialog_open = False
+
+    # ── Gap 5: Routing Decision Helpers ─────────────────────────────────────────
+
+    def _toggle_routing_edit(self) -> None:
+        self._routing_edit_mode = not self._routing_edit_mode
+
+    def _set_routing_decision_value(self, value: str) -> None:
+        self._routing_decision_value = value
+
+    async def acknowledge_proposal(self, proposal_id: str) -> None:
+        """POST /api/proposals/{proposal_id}/acknowledge (Gap 4)."""
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.post(
+                    f"{_API_BASE}/api/proposals/{proposal_id}/acknowledge"
+                )
+                resp.raise_for_status()
+                self.set_toast("Proposal acknowledged, resuming synthesis.", is_error=False)
+                # Restart polling
+                yield AppState.start_proposal_status_poll(proposal_id, self.selected_node_id)
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+
+    # ── Gap 5: Routing Decision ─────────────────────────────────────────────────
+
+    async def submit_routing_decision(self, node_id: str, finding_id: str, decision: str, acknowledged: bool = False) -> None:
+        """POST /api/nodes/{node_id}/routing-decision (Gap 5)."""
+        self.is_loading = True
+        yield
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.post(
+                    f"{_API_BASE}/api/nodes/{node_id}/routing-decision",
+                    json={
+                        "finding_id": finding_id,
+                        "decision": decision,
+                        "acknowledged": acknowledged,
+                    },
+                )
+                resp.raise_for_status()
+                self.set_toast("Routing decision recorded.", is_error=False)
+                # Reload node to get updated metadata
+                await AppState.select_node(node_id)
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+        self.is_loading = False
+
+    # ── Gap 6: JSON Export ──────────────────────────────────────────────────────
+
+    def export_node(self, node_id: str) -> None:
+        """Navigate to export endpoint to trigger file download (Gap 6)."""
+        return rx.window_open(f"{_API_BASE}/api/nodes/{node_id}/export", "_self")
+
+    # ── Gap 7: JSON Import ──────────────────────────────────────────────────────
+
+    async def handle_import(self, file_bytes: bytes, filename: str) -> None:
+        """POST /api/admin/import via multipart form data (Gap 7)."""
+        self.is_loading = True
+        yield
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                files = {"file": (filename, file_bytes, "application/json")}
+                resp = await client.post(
+                    f"{_API_BASE}/api/admin/import",
+                    files=files,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                self.set_toast("Import successful.", is_error=False)
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+        self.is_loading = False
+
+    # ── Gap 8: Dream Cycle ──────────────────────────────────────────────────────
+
+    async def trigger_dream_cycle(self) -> None:
+        """POST /api/admin/dream-cycle (Gap 8)."""
+        if self.dream_cycle_status == "running":
+            self.set_toast("Dream Cycle is already running.", is_error=True)
+            return
+        self.dream_cycle_is_running = True
+        self.is_loading = True
+        yield
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.post(
+                    f"{_API_BASE}/api/admin/dream-cycle"
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                self.set_toast("Dream Cycle started.", is_error=False)
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+        self.is_loading = False
+        self.dream_cycle_is_running = False
+
+    async def fetch_dream_cycle_status(self) -> None:
+        """GET /api/admin/dream-cycle/status (Gap 8)."""
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.get(
+                    f"{_API_BASE}/api/admin/dream-cycle/status"
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                self.dream_cycle_status = data.get("status", "idle")
+                self.dream_cycle_last_run = data.get("last_run", "")
+                self.dream_cycle_error = data.get("error", "")
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+
+    # ── Gap 9: Blueprint Management ─────────────────────────────────────────────
+
+    async def fetch_blueprints(self) -> None:
+        """GET /api/admin/blueprints (Gap 9)."""
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.get(
+                    f"{_API_BASE}/api/admin/blueprints"
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                self.admin_blueprints = data.get("blueprints", [])
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+
+    async def create_blueprint(self, name: str, version: str, prompt_text: str) -> None:
+        """POST /api/admin/blueprints (Gap 9)."""
+        if not name.strip() or not version.strip() or not prompt_text.strip():
+            self.set_toast("All fields are required.", is_error=True)
+            return
+        self.is_loading = True
+        yield
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.post(
+                    f"{_API_BASE}/api/admin/blueprints",
+                    json={
+                        "name": name.strip(),
+                        "version_string": version.strip(),
+                        "prompt_text": prompt_text.strip(),
+                    },
+                )
+                resp.raise_for_status()
+                self.set_toast("Blueprint created.", is_error=False)
+                await self.fetch_blueprints()
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+        self.is_loading = False
+
+    async def activate_blueprint(self, blueprint_id: str) -> None:
+        """POST /api/admin/blueprints/{id}/activate (Gap 9)."""
+        self.is_loading = True
+        yield
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.post(
+                    f"{_API_BASE}/api/admin/blueprints/{blueprint_id}/activate"
+                )
+                resp.raise_for_status()
+                self.set_toast("Blueprint activated.", is_error=False)
+                await self.fetch_blueprints()
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+        self.is_loading = False
+
+    # ── Gap 10: Insights Sidebar ────────────────────────────────────────────────
+
+    async def fetch_insights(self) -> None:
+        """GET /api/insights (Gap 10)."""
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.get(
+                    f"{_API_BASE}/api/insights"
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                self.insights = data.get("insights", [])
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+
+    # ── Milestone 4: Proposals (continued - refresh on completion) ───────────────
 
     async def refresh_projects(self) -> None:
         """Reload the projects list — used by the sidebar refresh button."""
