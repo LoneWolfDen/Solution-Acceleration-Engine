@@ -36,8 +36,8 @@ def import_panel() -> rx.Component:
                     ),
                     rx.upload(
                         rx.cond(
-                            rx.selected_files,
-                            rx.text(rx.selected_files()[0], size="2", weight="medium"),
+                            rx.selected_files(id_="import_upload").length() > 0,
+                            rx.text(rx.selected_files(id_="import_upload")[0], size="2", weight="medium"),
                             rx.vstack(
                                 rx.icon("upload", size=32, color="var(--accent-9)"),
                                 rx.text("Click or drag file", size="2", color_scheme="gray"),
@@ -55,11 +55,8 @@ def import_panel() -> rx.Component:
                         variant="soft",
                         color_scheme="indigo",
                         width="100%",
-                        disabled=~rx.selected_files,
-                        on_click=AppState.handle_import(
-                            rx.selected_files(),
-                            rx.selected_files()[0],
-                        ),
+                        disabled=~(rx.selected_files(id_="import_upload").length() > 0),
+                        on_click=AppState.handle_import(rx.upload_files(upload_id="import_upload")),
                     ),
                     spacing="3",
                     align="start",

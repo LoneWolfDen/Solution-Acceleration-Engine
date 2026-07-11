@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from typing import Any
 
 import httpx
 import reflex as rx
@@ -1286,16 +1287,22 @@ class AppState(rx.State):
 
     # ── Gap 7: JSON Import ──────────────────────────────────────────────────────
 
-    async def handle_import(self, file_bytes: bytes, filename: str) -> None:
+    async def handle_import(self, files: list[rx.UploadFile]) -> None:
         """POST /api/admin/import via multipart form data (Gap 7)."""
+        if not files:
+            self.set_toast("No file selected.", is_error=True)
+            return
         self.is_loading = True
         yield
+        file = files[0]
+        file_bytes = await file.read()
+        filename = file.name or "import.json"
         async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
             try:
-                files = {"file": (filename, file_bytes, "application/json")}
+                files_data = {"file": (filename, file_bytes, "application/json")}
                 resp = await client.post(
                     f"{_API_BASE}/api/admin/import",
-                    files=files,
+                    files=files_data,
                 )
                 resp.raise_for_status()
                 data = resp.json()

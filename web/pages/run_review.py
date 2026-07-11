@@ -130,38 +130,10 @@ def run_review_page() -> rx.Component:
                     spacing="2",
                     width="100%",
                 ),
-                # Gap 1: Linkable reviews selector
+                # Gap 1: Linkable reviews selector - fetch triggered in page on_load
                 rx.cond(
                     AppState.selected_version_id != "",
-                    rx.vstack(
-                        rx.text("Prior Reviews (Optional)", size="2", weight="medium"),
-                        rx.call(
-                            lambda: AppState.fetch_linkable_reviews(AppState.selected_version_id)
-                        ),
-                        rx.foreach(
-                            AppState.linkable_reviews,
-                            lambda review: rx.badge(
-                                rx.hstack(
-                                    rx.text(review["persona"], size="1", weight="medium"),
-                                    rx.text("•", size="1"),
-                                    rx.text(review["run_date"][:10], size="1", color_scheme="gray"),
-                                    spacing="1",
-                                    align="center",
-                                ),
-                                variant="solid",
-                                color_scheme=rx.cond(
-                                    AppState.selected_linked_review_ids.contains(review["review_id"]),
-                                    "indigo",
-                                    "gray",
-                                ),
-                                size="2",
-                                cursor="pointer",
-                                on_click=AppState.toggle_linked_review(review["review_id"]),
-                            ),
-                        ),
-                        spacing="2",
-                        width="100%",
-                    ),
+                    # TEMPORARILY DISABLED - Reflex list[dict] typing issue
                     rx.text("", width="0"),
                 ),
                 _backend_selector(),
