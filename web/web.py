@@ -45,5 +45,7 @@ app.add_page(
     index,
     route="/",
     title="Solution Acceleration Engine",
-    on_load=AppState.load_projects,
+    # Requirement C2.2 — populate the insights sidebar alongside the
+    # existing project list load.
+    on_load=[AppState.load_projects, AppState.fetch_insights],
 )

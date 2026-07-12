@@ -180,12 +180,12 @@ async def test_reviews_table_exists(db) -> None:
 
 @pytest.mark.asyncio
 async def test_schema_version_is_5(db) -> None:
-    """SCHEMA_VERSION constant and stored DB version must both be 6 (updated v5→v6)."""
-    assert SCHEMA_VERSION == 6
+    """SCHEMA_VERSION constant and stored DB version must both be 7 (updated v6→v7)."""
+    assert SCHEMA_VERSION == 7
     cursor = await db.execute("SELECT version FROM schema_version LIMIT 1")
     row = await cursor.fetchone()
     assert row is not None
-    assert row[0] == 6, f"Expected schema version 6, got {row[0]}"
+    assert row[0] == 7, f"Expected schema version 7, got {row[0]}"
 
 
 @pytest.mark.asyncio
@@ -243,7 +243,7 @@ async def test_migration_v2_to_v3_creates_reviews_table(tmp_path) -> None:
 
         cursor2 = await conn2.execute("SELECT version FROM schema_version LIMIT 1")
         row = await cursor2.fetchone()
-        assert row[0] == 6, f"schema_version not updated to 6, got {row[0]}"
+        assert row[0] == SCHEMA_VERSION, f"schema_version not updated to {SCHEMA_VERSION}, got {row[0]}"
     finally:
         await conn2.close()
 

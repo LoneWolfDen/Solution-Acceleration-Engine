@@ -6,6 +6,7 @@ Pure renderer: reads AppState vars, fires event handlers.
 
 import reflex as rx
 
+from web.components.insights_sidebar import insights_sidebar
 from web.state import AppState
 
 
@@ -263,6 +264,19 @@ def sidebar() -> rx.Component:
                 flex="1",
                 width="100%",
                 type="auto",
+            ),
+
+            rx.separator(width="100%"),
+
+            # Requirement C2.1 — advisory insights, positioned below the
+            # projects list as a fixed-height footer section.
+            rx.box(
+                insights_sidebar(),
+                width="100%",
+                padding="0.5rem",
+                max_height="240px",
+                overflow_y="auto",
+                flex_shrink="0",
             ),
 
             height="100vh",

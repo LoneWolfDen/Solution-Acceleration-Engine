@@ -104,11 +104,12 @@ class TestSidebarStructure:
 
 
 class TestSidebarForeachLoops:
-    def test_has_three_foreach_loops(self):
-        """projects, versions, and nodes each have a Foreach loop."""
+    def test_has_four_foreach_loops(self):
+        """projects, versions, nodes, and insights (Requirement C2.1) each
+        have a Foreach loop."""
         comp = sidebar()
         counts = collect_types(comp)
-        assert counts["Foreach"] == 3
+        assert counts["Foreach"] == 4
 
     def test_projects_foreach_references_projects_var(self):
         comp = sidebar()

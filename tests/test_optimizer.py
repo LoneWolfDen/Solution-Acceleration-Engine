@@ -769,7 +769,7 @@ async def test_prompt_delta_run_global_has_null_project_id(db) -> None:
 @pytest.mark.asyncio
 async def test_schema_version_is_current(db) -> None:
     """SCHEMA_VERSION constant must match what is stored in the DB."""
-    assert SCHEMA_VERSION == 6
+    assert SCHEMA_VERSION == 7
     cursor = await db.execute("SELECT version FROM schema_version LIMIT 1")
     row = await cursor.fetchone()
     assert row is not None
