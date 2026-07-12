@@ -36,6 +36,8 @@ class ArtifactRow:
     tags: List[str] = field(default_factory=list)
     is_active: bool = True
     created_at: str = ""
+    line_count: int = 0
+    content_preview: str = ""
 
 
 @dataclass
@@ -87,12 +89,21 @@ class LinkableReviewItem:
 
 @dataclass
 class ProposalListItem:
-    """Summary row returned by list_proposals_for_version."""
+    """Summary row returned by list_proposals_for_version / list_proposals_for_project."""
     proposal_id: str
     status: str
     created_at: str
     progress_message: Optional[str]
     linked_review_count: int
+    version_id: str = ""
+
+
+@dataclass
+class ReviewArtifactSnapshotItem:
+    """One row returned by get_review_job_artifact_snapshot."""
+    artifact_id: str
+    title: str
+    tags: List[str] = field(default_factory=list)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -108,6 +119,17 @@ def _new_id() -> str:
 
 
 def _row_to_artifact(row: aiosqlite.Row) -> ArtifactRow:
+    # line_count/content_preview may be absent on rows fetched via SELECT *
+    # before migration has run in a given process — guard with try/except so
+    # older in-flight connections don't hard-fail.
+    try:
+        line_count = row["line_count"]
+    except (IndexError, KeyError):
+        line_count = 0
+    try:
+        content_preview = row["content_preview"]
+    except (IndexError, KeyError):
+        content_preview = ""
     return ArtifactRow(
         id=row["id"],
         project_id=row["project_id"],
@@ -119,6 +141,8 @@ def _row_to_artifact(row: aiosqlite.Row) -> ArtifactRow:
         tags=json.loads(row["tags"] or "[]"),
         is_active=bool(row["is_active"]),
         created_at=row["created_at"],
+        line_count=line_count or 0,
+        content_preview=content_preview or "",
     )
 
 
@@ -170,21 +194,24 @@ async def create_artifact(
 ) -> ArtifactRow:
     row_id = _new_id()
     now = _now_iso()
+    line_count = len(content.splitlines())
+    content_preview = content[:280]
     await conn.execute(
         """
         INSERT INTO artifacts
             (id, project_id, title, content, source, source_url, filename,
-             tags, is_active, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+             tags, is_active, created_at, line_count, content_preview)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
         """,
         (row_id, project_id, title, content, source, source_url, filename,
-         json.dumps(tags), now),
+         json.dumps(tags), now, line_count, content_preview),
     )
     await conn.commit()
     return ArtifactRow(
         id=row_id, project_id=project_id, title=title, content=content,
         source=source, source_url=source_url, filename=filename,
         tags=tags, is_active=True, created_at=now,
+        line_count=line_count, content_preview=content_preview,
     )
 
 
@@ -691,7 +718,8 @@ async def list_proposals_for_version(
             pj.status           AS status,
             pj.created_at       AS created_at,
             pj.progress_message AS progress_message,
-            COUNT(prl.review_job_id) AS linked_review_count
+            COUNT(prl.review_job_id) AS linked_review_count,
+            MIN(rj.version_id) AS version_id
         FROM proposal_jobs pj
         JOIN proposal_review_links prl ON prl.proposal_job_id = pj.id
         JOIN review_jobs rj ON rj.id = prl.review_job_id
@@ -709,6 +737,132 @@ async def list_proposals_for_version(
             created_at=row["created_at"],
             progress_message=row["progress_message"],
             linked_review_count=row["linked_review_count"],
+            version_id=row["version_id"] or "",
+        )
+        for row in rows
+    ]
+
+
+async def list_proposals_for_project(
+    conn: aiosqlite.Connection,
+    project_id: str,
+) -> List[ProposalListItem]:
+    """Return all Proposal_Jobs whose linked reviews belong to any version
+    under *project_id* (Requirement A1 — additive project-scope aggregation).
+
+    This mirrors ``list_proposals_for_version`` but joins one level further
+    through ``versions`` to scope by project instead of by a single version.
+    It does NOT replace or weaken the existing version-scoped guard anywhere
+    else — it is a separate, read-only aggregation query.
+
+    Args:
+        conn:       Open aiosqlite connection.
+        project_id: FK → projects.id to filter on.
+
+    Returns:
+        List of :class:`ProposalListItem` (with `version_id` populated so the
+        UI can group/label proposals by version) ordered by proposal creation
+        date.  Empty list if the project has no proposals.
+    """
+    cursor = await conn.execute(
+        """
+        SELECT
+            pj.id               AS proposal_id,
+            pj.status           AS status,
+            pj.created_at       AS created_at,
+            pj.progress_message AS progress_message,
+            COUNT(prl.review_job_id) AS linked_review_count,
+            MIN(rj.version_id) AS version_id
+        FROM proposal_jobs pj
+        JOIN proposal_review_links prl ON prl.proposal_job_id = pj.id
+        JOIN review_jobs rj ON rj.id = prl.review_job_id
+        JOIN versions v ON v.id = rj.version_id
+        WHERE v.project_id = ?
+        GROUP BY pj.id
+        ORDER BY pj.created_at
+        """,
+        (project_id,),
+    )
+    rows = await cursor.fetchall()
+    return [
+        ProposalListItem(
+            proposal_id=row["proposal_id"],
+            status=row["status"],
+            created_at=row["created_at"],
+            progress_message=row["progress_message"],
+            linked_review_count=row["linked_review_count"],
+            version_id=row["version_id"] or "",
+        )
+        for row in rows
+    ]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Review Job Artifact Snapshots  (Requirement A2 — v7 junction table)
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def insert_review_job_artifact_snapshot(
+    conn: aiosqlite.Connection,
+    review_job_id: str,
+    artifact_ids: List[str],
+) -> None:
+    """Bulk-insert the artifact IDs active at review-creation time.
+
+    Snapshotting NEVER blocks or fails review creation: an empty
+    *artifact_ids* list is valid (zero active artifacts on the version) and
+    simply results in no rows being written.
+
+    Args:
+        conn:          Open aiosqlite connection.
+        review_job_id: FK → review_jobs.id — the review job being snapshotted.
+        artifact_ids:  IDs of artifacts active on the version at this moment.
+    """
+    if not artifact_ids:
+        return
+    for artifact_id in artifact_ids:
+        await conn.execute(
+            "INSERT OR IGNORE INTO review_job_artifact_snapshots "
+            "(review_job_id, artifact_id) VALUES (?, ?)",
+            (review_job_id, artifact_id),
+        )
+    await conn.commit()
+
+
+async def get_review_job_artifact_snapshot(
+    conn: aiosqlite.Connection,
+    review_job_id: str,
+) -> List[ReviewArtifactSnapshotItem]:
+    """Return the artifact set frozen at the time *review_job_id* was created.
+
+    This is immutable provenance: later changes to `artifacts.is_active` (or
+    even deleting the artifact-version link) do not alter what this function
+    returns, since it reads only from the snapshot junction table.
+
+    Args:
+        conn:          Open aiosqlite connection.
+        review_job_id: FK → review_jobs.id whose snapshot to retrieve.
+
+    Returns:
+        List of :class:`ReviewArtifactSnapshotItem`, ordered by artifact
+        creation time.  Empty list if the review had zero active artifacts
+        at creation time (not an error).
+    """
+    cursor = await conn.execute(
+        """
+        SELECT a.id AS artifact_id, a.title AS title, a.tags AS tags
+        FROM review_job_artifact_snapshots rjas
+        JOIN artifacts a ON a.id = rjas.artifact_id
+        WHERE rjas.review_job_id = ?
+        ORDER BY a.created_at
+        """,
+        (review_job_id,),
+    )
+    rows = await cursor.fetchall()
+    return [
+        ReviewArtifactSnapshotItem(
+            artifact_id=row["artifact_id"],
+            title=row["title"],
+            tags=json.loads(row["tags"] or "[]"),
         )
         for row in rows
     ]

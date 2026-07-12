@@ -68,6 +68,8 @@ class ArtifactInVersion(BaseModel):
     title: str
     tags: List[str] = []
     is_active: bool = True
+    line_count: int = 0
+    content_preview: str = ""
 
 
 class VersionDetailResponse(BaseModel):
@@ -100,6 +102,8 @@ class ArtifactItem(BaseModel):
     tags: List[str] = []
     is_active: bool = True
     created_at: str
+    line_count: int = 0
+    content_preview: str = ""
 
 
 class ArtifactListResponse(BaseModel):
@@ -113,6 +117,8 @@ class ArtifactResponse(BaseModel):
     tags: List[str] = []
     is_active: bool = True
     created_at: str
+    line_count: int = 0
+    content_preview: str = ""
     error: Optional[str] = None
 
 
@@ -139,6 +145,14 @@ class ReviewListResponse(BaseModel):
     error: Optional[str] = None
 
 
+class CitationItem(BaseModel):
+    """Full citation detail for a finding (Requirement A5)."""
+    file_path: str
+    line_start: int
+    line_end: int
+    excerpt: str
+
+
 class FindingItem(BaseModel):
     finding_id: str
     type: str
@@ -146,6 +160,7 @@ class FindingItem(BaseModel):
     text: str
     source_artifact: str
     citation: str = ""
+    citations: List[CitationItem] = []
 
 
 class FindingsSummary(BaseModel):
@@ -186,6 +201,19 @@ class ReviewStatusResponse(BaseModel):
     review_id: str
     status: str
     progress_message: Optional[str] = None
+    error: Optional[str] = None
+
+
+# ── Review-Run Artifact Snapshot Provenance (Requirement A2) ────────────────────
+
+class ReviewArtifactSnapshotItem(BaseModel):
+    artifact_id: str
+    title: str
+    tags: List[str] = []
+
+
+class ReviewArtifactSnapshotResponse(BaseModel):
+    artifacts: List[ReviewArtifactSnapshotItem]
     error: Optional[str] = None
 
 
@@ -244,6 +272,7 @@ class ProposalListItem(BaseModel):
     created_at: str
     progress_message: Optional[str] = None
     linked_review_count: int
+    version_id: str = ""
 
 
 class ProposalListResponse(BaseModel):

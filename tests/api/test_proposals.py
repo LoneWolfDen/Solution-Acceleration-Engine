@@ -82,3 +82,86 @@ def test_proposal_status_has_progress_message_field(client, review_id):
     ).json()["proposal_id"]
     body = client.get(f"/api/proposals/{proposal_id}/status").json()
     assert "progress_message" in body
+
+
+# ── Requirement A1: Project-scoped proposal aggregation (additive) ──────────
+
+
+def _setup_version_with_complete_review(client, project_id, event_loop, version_name="v1"):
+    """Create a version with one artifact, one review job, and force it to
+    'complete' status directly via the review_jobs table so a proposal can be
+    created against it (mirrors the pipeline's terminal state)."""
+    from contexta.api import repositories as api_repo
+
+    aid = client.post(
+        "/api/artifacts",
+        data={"project_id": project_id, "title": "Art", "source": "paste",
+              "content": "content", "tags": "[]"},
+    ).json()["artifact_id"]
+    version_id = client.post(
+        "/api/versions",
+        json={"project_id": project_id, "version_name": version_name, "artifact_ids": [aid]},
+    ).json()["version_id"]
+    review_id = client.post(
+        "/api/reviews",
+        json={"version_id": version_id, "persona_roles": ["Architect"], "context": ""},
+    ).json()["review_id"]
+
+    # Force the review job to 'complete' so it is eligible to feed a proposal.
+    conn = client.app.state.db
+    event_loop.run_until_complete(
+        api_repo.update_review_job_status(conn, review_id, status="complete")
+    )
+    return version_id, review_id
+
+
+def test_project_scoped_proposals_aggregates_across_versions(test_app, project_id, event_loop):
+    """2 versions, 1 proposal each — both appear via the project endpoint
+    with correct version_id."""
+    v1, r1 = _setup_version_with_complete_review(test_app, project_id, event_loop, "v1")
+    v2, r2 = _setup_version_with_complete_review(test_app, project_id, event_loop, "v2")
+
+    p1 = test_app.post(f"/api/versions/{v1}/proposals", json={"review_ids": [r1]})
+    assert p1.status_code == 202
+    p2 = test_app.post(f"/api/versions/{v2}/proposals", json={"review_ids": [r2]})
+    assert p2.status_code == 202
+
+    resp = test_app.get(f"/api/projects/{project_id}/proposals")
+    assert resp.status_code == 200
+    proposals = resp.json()["proposals"]
+    assert len(proposals) == 2
+    version_ids = {p["version_id"] for p in proposals}
+    assert version_ids == {v1, v2}
+
+
+def test_project_scoped_proposals_unknown_project_404(test_app):
+    resp = test_app.get("/api/projects/no-such-project/proposals")
+    assert resp.status_code == 404
+    assert resp.json()["error"] is not None
+
+
+def test_project_scoped_proposals_empty_when_no_proposals(test_app, project_id):
+    resp = test_app.get(f"/api/projects/{project_id}/proposals")
+    assert resp.status_code == 200
+    assert resp.json()["proposals"] == []
+
+
+def test_version_scoped_proposals_endpoint_unchanged_by_project_endpoint(
+    test_app, project_id, event_loop
+):
+    """Regression guard: the existing version-scoped endpoint's guard and
+    shape are untouched by the additive project-scoped endpoint."""
+    v1, r1 = _setup_version_with_complete_review(test_app, project_id, event_loop, "v1")
+    test_app.post(f"/api/versions/{v1}/proposals", json={"review_ids": [r1]})
+
+    resp = test_app.get(f"/api/versions/{v1}/proposals")
+    assert resp.status_code == 200
+    proposals = resp.json()["proposals"]
+    assert len(proposals) == 1
+    assert proposals[0]["version_id"] == v1
+
+    # 422 guard on invalid review_ids still applies unchanged.
+    bad_resp = test_app.post(
+        f"/api/versions/{v1}/proposals", json={"review_ids": ["no-such-review"]}
+    )
+    assert bad_resp.status_code == 422

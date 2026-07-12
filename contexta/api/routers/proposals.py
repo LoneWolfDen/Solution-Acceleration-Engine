@@ -162,6 +162,48 @@ async def list_version_proposals(
                 created_at=item.created_at,
                 progress_message=item.progress_message,
                 linked_review_count=item.linked_review_count,
+                version_id=item.version_id,
+            )
+            for item in items
+        ]
+    )
+
+
+# ── Project-scoped proposal aggregation (Requirement A1 — additive) ───────────
+
+@router.get(
+    "/projects/{project_id}/proposals",
+    response_model=schemas.ProposalListResponse,
+)
+async def list_project_proposals(
+    project_id: str,
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> schemas.ProposalListResponse:
+    """Return proposals for every review job belonging to any version under
+    this project (Requirement A1).
+
+    This is purely additive: it does NOT remove or weaken the version-scoped
+    ``WHERE rj.version_id = ?`` guard in ``list_version_proposals`` above, and
+    does not modify ``create_version_proposal``/``list_version_proposals`` or
+    their existing 422 validation guards.  Each item includes ``version_id``
+    so the UI can group/label proposals by version at the project level.
+    """
+    project = await db_repo.get_project(conn, project_id)
+    if project is None:
+        raise HTTPException(
+            status_code=404, detail=f"Project '{project_id}' not found."
+        )
+
+    items = await api_repo.list_proposals_for_project(conn, project_id)
+    return schemas.ProposalListResponse(
+        proposals=[
+            schemas.ProposalListItem(
+                proposal_id=item.proposal_id,
+                status=item.status,
+                created_at=item.created_at,
+                progress_message=item.progress_message,
+                linked_review_count=item.linked_review_count,
+                version_id=item.version_id,
             )
             for item in items
         ]
