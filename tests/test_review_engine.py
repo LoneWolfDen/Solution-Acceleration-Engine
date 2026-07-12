@@ -94,11 +94,11 @@ async def db_with_version(db):
 
 
 @pytest.fixture()
-def engine(llm_config, blueprint_row, minimal_schema_json):
+def engine(llm_config, blueprint_row):
     """ArbitratorEngine instance for run_with_context() tests."""
     from contexta.llm.prompts import PromptBuilder
 
-    builder = PromptBuilder(blueprint=blueprint_row, schema_json=minimal_schema_json)
+    builder = PromptBuilder(blueprint=blueprint_row)
     return ArbitratorEngine(config=llm_config, builder=builder)
 
 

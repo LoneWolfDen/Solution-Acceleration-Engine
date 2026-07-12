@@ -33,16 +33,71 @@ def test_create_proposal_unknown_review_returns_404(client):
     assert resp.status_code == 404
 
 
-def test_create_proposal_node_stored_in_db(client, db_conn, review_id):
-    """Proposal node is persisted to DB after POST."""
-    import asyncio
+def test_create_proposal_node_stored_in_db(client, db_conn, review_id, event_loop):
+    """Proposal node is persisted to DB after POST.
+
+    Synthesis requires a configured LLM provider and a real LLM call; both
+    are stubbed here (an Ollama URL is seeded into ``app_config`` and
+    ``litellm.acompletion`` is mocked) so the background task can run to
+    completion without a live model.
+    """
+    import json
+    from unittest.mock import AsyncMock, MagicMock, patch
+
     from contexta.db import repositories as repo
-    proposal_id = client.post(
-        "/api/proposals", json={"review_id": review_id}
-    ).json()["proposal_id"]
-    node = asyncio.get_event_loop().run_until_complete(repo.get_node(db_conn, proposal_id))
+
+    event_loop.run_until_complete(
+        db_conn.execute(
+            "INSERT INTO app_config (key, value) VALUES ('ollama_url', 'http://localhost:11434')"
+        )
+    )
+    event_loop.run_until_complete(db_conn.commit())
+
+    choice = MagicMock()
+    choice.message.content = json.dumps(
+        {
+            "executive_summary": "Summary.",
+            "delivery_confidence_score": 80,
+            "critical_conflicts": [],
+            "architectural_risks": [],
+            "actionable_recommendations": [],
+            "ready_for_approval": True,
+        }
+    )
+    choice.finish_reason = "stop"
+    mock_resp = MagicMock()
+    mock_resp.choices = [choice]
+
+    with patch(
+        "contexta.llm.provider.litellm.acompletion",
+        AsyncMock(return_value=mock_resp),
+    ):
+        proposal_id = client.post(
+            "/api/proposals", json={"review_id": review_id}
+        ).json()["proposal_id"]
+
+    status_body = client.get(f"/api/proposals/{proposal_id}/status").json()
+    assert status_body["status"] == "complete", status_body
+
+    # The synthesis node written by the real pipeline has its own ID, stored
+    # in proposal_jobs.node_id (not equal to proposal_id — that assumption
+    # only held for the old in-memory stub implementation).
+    from contexta.api import repositories as api_repo
+
+    job = event_loop.run_until_complete(api_repo.get_proposal_job(db_conn, proposal_id))
+    assert job is not None
+    assert job.node_id is not None
+
+    node = event_loop.run_until_complete(repo.get_node(db_conn, job.node_id))
     assert node is not None
-    assert node.parent_id == review_id
+
+    # The synthesis node's parent is the *exploration* node produced by the
+    # review (review_jobs.node_id) — review_id itself is the review_jobs row
+    # ID, a separate identifier from the exploration node it points to.
+    review_job = event_loop.run_until_complete(
+        api_repo.get_review_job(db_conn, review_id)
+    )
+    assert node.parent_id == review_job.node_id
 
 
 def test_create_multiple_proposals_for_same_review(client, review_id):

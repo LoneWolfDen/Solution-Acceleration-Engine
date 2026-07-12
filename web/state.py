@@ -124,6 +124,11 @@ class AppState(rx.State):
     active_proposal_progress_message: str = ""
     proposal_poll_active: bool = False
 
+    # ── Proposal detail page (/proposal/[proposal_id]) ─────────────────────────
+    proposal_detail: dict = {}
+    proposal_detail_loading: bool = False
+    proposal_detail_not_found: bool = False
+
     # ── Admin Gap 9: Blueprints State ───────────────────────────────────────────
     admin_blueprints: list[dict] = []
 
@@ -1126,6 +1131,47 @@ class AppState(rx.State):
             else:
                 self.set_toast("Proposal ready.", is_error=False)
 
+    # ── Proposal detail page (/proposal/[proposal_id]) ──────────────────────────
+
+    async def load_proposal_detail(self) -> None:
+        """on_load for /proposal/[proposal_id] — GET /api/proposals/{id}/status.
+
+        ``self.proposal_id`` is auto-injected by Reflex from the dynamic
+        route segment ``[proposal_id]`` (see web/pages/proposal.py).
+        """
+        proposal_id = self.proposal_id
+        self.proposal_detail_loading = True
+        self.proposal_detail_not_found = False
+        self.proposal_detail = {}
+        yield
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            try:
+                resp = await client.get(
+                    f"{_API_BASE}/api/proposals/{proposal_id}/status"
+                )
+                if resp.status_code == 404:
+                    self.proposal_detail_not_found = True
+                else:
+                    resp.raise_for_status()
+                    self.proposal_detail = resp.json()
+            except httpx.HTTPStatusError as exc:
+                self.set_toast(self._extract_error(exc), is_error=True)
+            except httpx.RequestError as exc:
+                self.set_toast(f"Network error: {exc}", is_error=True)
+        self.proposal_detail_loading = False
+
+    @rx.var(cache=True)
+    def proposal_detail_status(self) -> str:
+        return self.proposal_detail.get("status", "")
+
+    @rx.var(cache=True)
+    def proposal_detail_report(self) -> dict:
+        return self.proposal_detail.get("report") or {}
+
+    @rx.var(cache=True)
+    def proposal_detail_progress_message(self) -> str:
+        return self.proposal_detail.get("progress_message") or ""
+
     # ── Gap 1: Review Linking ───────────────────────────────────────────────────
 
     async def fetch_linkable_reviews(self, version_id: str) -> None:
@@ -1319,6 +1365,19 @@ class AppState(rx.State):
 
     def toggle_routing_edit(self) -> None:
         self._routing_edit_mode = not self._routing_edit_mode
+
+    @rx.var(cache=True)
+    def routing_edit_mode(self) -> bool:
+        """Public computed accessor for ``_routing_edit_mode``.
+
+        Reflex only compiles underscore-prefixed vars as plain backend
+        state, not as reactive Vars — using ``~AppState._routing_edit_mode``
+        directly in a component evaluates the raw Python value at compile
+        time (``~False`` -> ``-1``, not a boolean Var), which raised a
+        TypeError on the ``disabled`` prop in scope_policy_panel.py. This
+        public wrapper is what components should read/negate instead.
+        """
+        return self._routing_edit_mode
 
     def set_routing_decision_value(self, value: str) -> None:
         self._routing_decision_value = value

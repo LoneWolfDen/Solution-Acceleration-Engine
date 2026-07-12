@@ -17,7 +17,7 @@ from hypothesis import given, settings, assume
 from hypothesis import strategies as st
 from unittest.mock import patch
 
-from contexta.config import ConfigError, ContextaConfig, load_config
+from contexta.config import _PROJECT_ROOT, ConfigError, ContextaConfig, load_config
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -118,9 +118,10 @@ def test_property2_other_vars_absent_do_not_raise() -> None:
     """
     env = {"CONTEXTA_LLM_BACKEND": "ollama/mistral"}
     cfg = _load_with_env(env)
-    # Defaults are applied
-    assert cfg.db_path == "/data/contexta.db"
-    assert cfg.export_path == "/exports"
+    # Defaults are applied — resolved relative to the project root so local
+    # (non-Docker) dev environments don't require a filesystem-root /data dir.
+    assert cfg.db_path == str(_PROJECT_ROOT / "data" / "contexta.db")
+    assert cfg.export_path == str(_PROJECT_ROOT / "exports")
     assert cfg.log_level == "WARNING"
     assert cfg.execution_mode == "UNIFIED"
     assert cfg.llm_api_key is None

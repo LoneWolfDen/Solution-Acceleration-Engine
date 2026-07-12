@@ -350,9 +350,7 @@ class ContextaApp(App):
                     )
                 return
 
-            # schema_json is only consumed by build_dimension_prompt; the
-            # arbitrator call uses ARBITRATOR_SYSTEM_TEMPLATE directly.
-            builder = PromptBuilder(blueprint=active_bp, schema_json="")
+            builder = PromptBuilder(blueprint=active_bp)
             payloads = self._orchestrator.get_all_payloads()
             engine = ArbitratorEngine(config=self._llm_config, builder=builder)
             result = await engine.run(payloads, callback=_callback)

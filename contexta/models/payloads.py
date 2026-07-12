@@ -40,7 +40,7 @@ class ReviewNodePayload(BaseModel):
     base_findings: List[IssueFinding] = Field(default_factory=list)
     user_annotations: List[UserAnnotation] = Field(default_factory=list)
     overall_confidence: ConfidenceEnum
-    raw_llm_response: str
+    raw_llm_response: str = ""
 
     @model_validator(mode="after")
     def _populate_base_findings(self) -> "ReviewNodePayload":
