@@ -1,0 +1,515 @@
+{
+  "pbtResults": {},
+  "executionHistory": {
+    "1.1 Enumerate and classify all acceptance criteria in `.kiro/specs/project-contexta/requirements.md` Requirements 1–14": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514429
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868521745
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869215026
+      }
+    ],
+    "2.1 Verify backend existence and API wiring for review linking": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514459
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869220077
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869360375
+      }
+    ],
+    "2.2 Verify UI rendering for review linking and Prior Review Intelligence injection": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514478
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869221049
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869360441
+      }
+    ],
+    "3.1 Verify proposal backend/API scope boundary (version-scoped vs project-scoped)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514497
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869222101
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869362491
+      }
+    ],
+    "3.2 Verify version-level proposal UI wiring": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514522
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869223078
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869363117
+      }
+    ],
+    "4.1 Verify fork backend existence, API wiring, and UI rendering": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514543
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869223485
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869363208
+      }
+    ],
+    "5.1 Verify advisor backend existence, API wiring, and UI rendering": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514561
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869368240
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869526549
+      }
+    ],
+    "6.1 Verify scope policy backend existence, API wiring, and UI rendering": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514579
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869369262
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869525428
+      }
+    ],
+    "7.1 Verify export backend existence, API wiring, and UI rendering": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514596
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869369326
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869527242
+      }
+    ],
+    "8.1 Verify import backend existence, API wiring, and UI rendering": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514617
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869371007
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869527185
+      }
+    ],
+    "9.1 Verify Dream Cycle backend existence, API wiring, and UI rendering": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514639
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869371078
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869524433
+      }
+    ],
+    "10.1 Verify Blueprint backend existence, API wiring, and UI rendering": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514656
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869532354
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869762037
+      }
+    ],
+    "11.1 Verify Insights backend existence, API wiring, and UI rendering": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514672
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869532412
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869761969
+      }
+    ],
+    "12.1 Trace tag/label data path from upload through storage to every UI surface": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514690
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869533420
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869765267
+      }
+    ],
+    "13.1 Trace citation and provenance data from source model through API to finding display": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514709
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869534418
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869763092
+      }
+    ],
+    "13.2 Verify artifact-version link exposure for review-run provenance": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514732
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869534978
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869765251
+      }
+    ],
+    "14.1 Verify web-realizable coverage of remaining Web_Scope items from Requirements 1, 2, 4, 7, and 10 (project bootstrapping, SQLite data layer exposure, MCP-derived artifact browsing, node/version navigation) not already covered by tasks 2–13": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514748
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869770600
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783870763884
+      }
+    ],
+    "15. Checkpoint — review investigation findings before re-verification pass": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514765
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783870799024
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783870804255
+      }
+    ],
+    "16.1 Build the re-verification table for all 11 Core_Gaps_Spec items": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514782
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783870819220
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783871010350
+      }
+    ],
+    "16.2 Identify Tracking_Gap discrepancies against `core-scope-gaps-implementation/tasks.md`": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514799
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783870819883
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783871010681
+      }
+    ],
+    "17.1 Confirm `/scripts` directory contents and record the absence of markdown files": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514816
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869770615
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783870764215
+      }
+    ],
+    "18.1 Write `gap-analysis.md` following the section structure from design.md": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514833
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783871020960
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783871279877
+      }
+    ],
+    "19. Final checkpoint — Ensure the report is complete": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783868514851
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783871283882
+      },
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783871288190
+      }
+    ],
+    "1. Scope enumeration and Web_Scope filtering": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869215052
+      }
+    ],
+    "2. Investigate Review Linking & Prior Review Intelligence (originally reported issue; Core_Gaps_Spec item 1)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869360469
+      }
+    ],
+    "3. Investigate Proposals & Synthesis (originally reported issue; Core_Gaps_Spec items 2 and 11)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869363142
+      }
+    ],
+    "4. Investigate Fork / Node Branching (Core_Gaps_Spec item 3)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869363226
+      }
+    ],
+    "9. Investigate Dream Cycle (Core_Gaps_Spec item 8)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869524460
+      }
+    ],
+    "6. Investigate Scope Policy & Routing Decisions (Core_Gaps_Spec item 5)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869525452
+      }
+    ],
+    "5. Investigate Proactive Advisor (Core_Gaps_Spec item 4)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869526573
+      }
+    ],
+    "8. Investigate JSON Import (Core_Gaps_Spec item 7)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869527211
+      }
+    ],
+    "7. Investigate JSON Export (Core_Gaps_Spec item 6)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869527260
+      }
+    ],
+    "11. Investigate Global Client Insights Sidebar (Core_Gaps_Spec item 10)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869761998
+      }
+    ],
+    "10. Investigate Blueprint Management (Core_Gaps_Spec item 9)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869762054
+      }
+    ],
+    "13. Investigate Artifact Traceability / Citations (newly reported symptom)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869765282
+      }
+    ],
+    "12. Investigate Artifact Labeling (newly reported symptom)": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783869765302
+      }
+    ],
+    "14. Investigate remaining Projects, Versions & Navigation Web_Scope items": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783870763909
+      }
+    ],
+    "17. Record the Scripts_Markdown_Note": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783870764238
+      }
+    ],
+    "16. Re-verify the 11 Core_Gaps_Spec items and cross-reference tasks.md": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783871010704
+      }
+    ],
+    "18. Assemble and write the audit report": [
+      {
+        "executionId": "31fe41ea-f39b-4156-9692-19566a13254f",
+        "chatSessionId": "sess_3f61dbde-8406-4dea-96fd-96c86b7487be",
+        "timestamp": 1783871279902
+      }
+    ]
+  }
+}
