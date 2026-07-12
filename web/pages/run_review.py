@@ -15,6 +15,7 @@ Gap 2/11: Proposal creation is available on the version detail page.
 
 import reflex as rx
 
+from web.components.review_link_selector import review_link_selector
 from web.state import AppState
 
 # Static persona role list — matches the options already used in the
@@ -133,8 +134,7 @@ def run_review_page() -> rx.Component:
                 # Gap 1: Linkable reviews selector - fetch triggered in page on_load
                 rx.cond(
                     AppState.selected_version_id != "",
-                    # TEMPORARILY DISABLED - Reflex list[dict] typing issue
-                    rx.text("", width="0"),
+                    review_link_selector(AppState.selected_version_id),
                 ),
                 _backend_selector(),
                 _context_textarea(),
@@ -183,6 +183,12 @@ def run_review_page() -> rx.Component:
 # and load_admin_page (populates run_review_available_backends from admin config).
 run_review_page = rx.page(
     route="/run-review/[version_id]",
-    on_load=[AppState.init_run_review_page, AppState.load_admin_page],
+    on_load=[
+        AppState.init_run_review_page,
+        AppState.load_admin_page,
+        # Requirement C1.2 — populate the review_link_selector with data
+        # on page load without requiring a manual refresh.
+        AppState.load_run_review_linkable,
+    ],
     title="Run Review — SAE",
 )(run_review_page)

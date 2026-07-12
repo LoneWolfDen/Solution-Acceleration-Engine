@@ -95,6 +95,8 @@ async def list_artifacts(
                 tags=a.tags,
                 is_active=a.is_active,
                 created_at=a.created_at,
+                line_count=a.line_count,
+                content_preview=a.content_preview,
             )
             for a in artifacts
         ]
@@ -167,6 +169,8 @@ async def create_artifact(
         tags=artifact.tags,
         is_active=artifact.is_active,
         created_at=artifact.created_at,
+        line_count=artifact.line_count,
+        content_preview=artifact.content_preview,
     )
 
 
@@ -186,6 +190,8 @@ async def update_artifact_active(
         tags=updated.tags,
         is_active=updated.is_active,
         created_at=updated.created_at,
+        line_count=updated.line_count,
+        content_preview=updated.content_preview,
     )
 
 

@@ -13,25 +13,19 @@ from web.state import AppState
 
 def _review_checkbox(review: dict) -> rx.Component:
     """A checkbox for selecting a review to include in proposal."""
+    # NOTE: this Reflex version's ArrayVar has no `.filter()`/`.set()`
+    # methods, so toggling is delegated to the existing, already-tested
+    # AppState.toggle_linked_review() handler (used by review_link_selector.py)
+    # rather than constructing an inline add/remove Var expression.
     return rx.hstack(
         rx.checkbox(
             checked=AppState.selected_linked_review_ids.contains(review["review_id"]),
-            on_change=lambda checked: rx.cond(
-                checked,
-                AppState.selected_linked_review_ids.set(
-                    AppState.selected_linked_review_ids + [review["review_id"]]
-                ),
-                AppState.selected_linked_review_ids.set(
-                    AppState.selected_linked_review_ids.filter(
-                        lambda rid: rid != review["review_id"]
-                    )
-                ),
-            ),
+            on_change=lambda _checked: AppState.toggle_linked_review(review["review_id"]),
         ),
         rx.vstack(
             rx.text(review["persona"], size="2", weight="medium"),
             rx.text(
-                f"Completed: {review['run_date'][:10]}",
+                "Completed: " + review["run_date"].to(str)[:10],
                 size="1",
                 color_scheme="gray",
             ),
@@ -177,7 +171,7 @@ def proposals_list(version_id: str) -> rx.Component:
                                 ),
                                 rx.vstack(
                                     rx.text(
-                                        f"Proposal • {p['linked_review_count']} review(s)",
+                                        "Proposal • " + p["linked_review_count"].to(str) + " review(s)",
                                         size="2",
                                         weight="medium",
                                     ),
@@ -197,7 +191,7 @@ def proposals_list(version_id: str) -> rx.Component:
                                             size="1",
                                         ),
                                         rx.text(
-                                            p["created_at"][:10],
+                                            p["created_at"].to(str)[:10],
                                             size="1",
                                             color_scheme="gray",
                                         ),
@@ -217,7 +211,7 @@ def proposals_list(version_id: str) -> rx.Component:
                                             variant="soft",
                                             color_scheme="indigo",
                                         ),
-                                        href=f"/proposal/{p['proposal_id']}",
+                                        href="/proposal/" + p["proposal_id"].to(str),
                                     ),
                                     rx.text("", width="0"),
                                 ),

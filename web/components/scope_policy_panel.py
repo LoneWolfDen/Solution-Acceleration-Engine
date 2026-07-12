@@ -13,9 +13,14 @@ from web.state import AppState
 
 def _finding_row(finding: dict) -> rx.Component:
     """A single finding row with routing decision buttons."""
-    # Check if this finding has already been routed
-    has_routing_decision = AppState.selected_node.get("metadata_json", {}).get("routing_decisions", [])
-    
+    # Latest routing decision label for this finding, keyed by finding_id in
+    # a typed dict[str, str] computed var (this Reflex version's ArrayVar has
+    # no `.filter()` method, so the lookup + label mapping is pre-computed
+    # server-side and consumed here via compile-safe `.contains()`/`[...]`).
+    finding_id = finding["finding_id"].to(str)
+    has_decision = AppState.routing_decision_label_by_finding.contains(finding_id)
+    decision_label = AppState.routing_decision_label_by_finding.get(finding_id, "")
+
     return rx.vstack(
         rx.hstack(
             rx.icon(rx.cond(finding["severity"] == "HIGH", "triangle-alert", "info"), size=16, color="var(--gray-9)"),
@@ -37,23 +42,9 @@ def _finding_row(finding: dict) -> rx.Component:
                     ),
                     rx.cond(
                         # Check if this finding_id has been routed
-                        AppState.selected_node.get("metadata_json", {}).get("routing_decisions", [])
-                        .filter(lambda d: d["finding_id"] == finding["finding_id"])
-                        .length() > 0,
+                        has_decision,
                         rx.badge(
-                            rx.cond(
-                                AppState.selected_node.get("metadata_json", {}).get("routing_decisions", [])
-                                .filter(lambda d: d["finding_id"] == finding["finding_id"])[-1]["decision"]
-                                == "scope_modification",
-                                "Approved",
-                                rx.cond(
-                                    AppState.selected_node.get("metadata_json", {}).get("routing_decisions", [])
-                                    .filter(lambda d: d["finding_id"] == finding["finding_id"])[-1]["decision"]
-                                    == "risk_register",
-                                    "Risk Register",
-                                    "Assumptions Matrix",
-                                ),
-                            ),
+                            decision_label,
                             color_scheme="green",
                             variant="soft",
                             size="1",
@@ -68,7 +59,7 @@ def _finding_row(finding: dict) -> rx.Component:
                                     rx.select.item("Approve Scope Modification", value="scope_modification"),
                                 ),
                                 value=AppState._routing_decision_value,
-                                on_change=AppState._set_routing_decision_value,
+                                on_change=AppState.set_routing_decision_value,
                             ),
                             rx.text("", width="0"),
                         ),
@@ -125,7 +116,7 @@ def scope_policy_panel() -> rx.Component:
                     size="2",
                     variant="soft",
                     color_scheme="indigo",
-                    on_click=AppState._toggle_routing_edit,
+                    on_click=AppState.toggle_routing_edit,
                 ),
                 spacing="3",
                 align="center",

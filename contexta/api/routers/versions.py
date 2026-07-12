@@ -69,6 +69,8 @@ async def get_version(
             title=a.title,
             tags=a.tags,
             is_active=a.is_active,
+            line_count=a.line_count,
+            content_preview=a.content_preview,
         )
         for a in artifacts
     ]

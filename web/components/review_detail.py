@@ -11,6 +11,7 @@ import reflex as rx
 
 from web.state import AppState
 from web.components.finding_card import finding_card
+from web.components.scope_policy_panel import scope_policy_panel
 from web.components.status_banner import proposal_status_banner
 
 
@@ -221,6 +222,9 @@ def review_detail_pane() -> rx.Component:
                         width="100%",
                     ),
                 ),
+                # Requirement B3.1 — scope policy panel, positioned after the
+                # findings list and before the proposal pane.
+                scope_policy_panel(),
                 rx.separator(width="100%"),
                 _proposal_pane(),
                 spacing="4",

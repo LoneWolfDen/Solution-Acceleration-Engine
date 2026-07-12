@@ -10,6 +10,8 @@ directly so it can be used safely as a style property value.
 
 import reflex as rx
 
+from web.state import AppState
+
 
 def _severity_border(severity: rx.Var) -> rx.Var:
     """Return a full CSS border-left string based on severity."""
@@ -45,13 +47,16 @@ def finding_card(finding: dict) -> rx.Component:
                 _type_badge(finding["type"]),
                 _severity_badge(finding["severity"]),
                 rx.spacer(),
-                rx.text(
+                rx.link(
                     finding["source_artifact"],
                     size="1",
-                    color_scheme="gray",
+                    color_scheme="indigo",
                     font_family="monospace",
                     truncate=True,
                     max_width="200px",
+                    cursor="pointer",
+                    on_click=AppState.navigate_to_artifact(finding["source_artifact"]),
+                    _hover={"text_decoration": "underline"},
                 ),
                 align="center",
                 width="100%",

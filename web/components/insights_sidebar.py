@@ -36,13 +36,13 @@ def _insight_card(insight: dict) -> rx.Component:
             rx.hstack(
                 rx.text("Frequency:", size="1", color_scheme="gray"),
                 rx.text(
-                    insight["frequency_count"],
+                    insight["frequency_count"].to(str),
                     size="1",
                     weight="bold",
                     color_scheme="indigo",
                 ),
                 rx.text(
-                    f"Updated: {insight['last_updated'][:10]}",
+                    "Updated: " + insight["last_updated"].to(str)[:10],
                     size="1",
                     color_scheme="gray",
                 ),

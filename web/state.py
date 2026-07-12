@@ -148,6 +148,47 @@ class AppState(rx.State):
         return self.selected_node.get("findings", [])
 
     @rx.var(cache=True)
+    def selected_node_routing_decisions(self) -> list[dict]:
+        """Routing decisions recorded on the selected node's metadata (Gap 5).
+
+        Exposed as a typed computed var (list[dict]) rather than accessed via
+        ``.get()`` chains on ``selected_node`` directly in component code —
+        ``selected_node`` is a plain dict Var whose nested values are
+        untyped ``Any`` for Reflex's compiler, so `.get()` on the nested
+        result fails at compile time. Mirrors the pattern used by
+        ``current_findings``/``triage_active_artifact_ids``.
+        """
+        metadata = self.selected_node.get("metadata_json") or {}
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+        return metadata.get("routing_decisions", []) if isinstance(metadata, dict) else []
+
+    @rx.var(cache=True)
+    def routing_decision_label_by_finding(self) -> dict[str, str]:
+        """Display label of the latest routing decision per finding_id.
+
+        Keyed dict[str, str] for O(1) bracket lookup inside rx.foreach
+        callbacks — this Reflex version's ArrayVar has no `.filter()` method
+        and ObjectVar values can't be re-subscripted once retrieved via
+        `[...]`, so the final display label is fully pre-computed
+        server-side rather than nested-indexed in component code.
+        """
+        labels = {
+            "scope_modification": "Approved",
+            "risk_register": "Risk Register",
+            "assumptions_matrix": "Assumptions Matrix",
+        }
+        result: dict[str, str] = {}
+        for decision in self.selected_node_routing_decisions:
+            fid = decision.get("finding_id")
+            if fid:
+                result[fid] = labels.get(decision.get("decision", ""), "Assumptions Matrix")
+        return result
+
+    @rx.var(cache=True)
     def current_version(self) -> dict:
         """Returns the current version merged with its reviews."""
         if not self.selected_version:
@@ -414,6 +455,11 @@ class AppState(rx.State):
             except httpx.RequestError as exc:
                 self.set_toast(f"Network error: {exc}", is_error=True)
         self.is_loading = False
+        # Requirement B1.2 — the Proposals section on version_detail.py needs
+        # both linkable reviews and existing proposals without a separate
+        # navigation step.
+        await self.fetch_linkable_reviews(version_id)
+        await self.fetch_proposals_for_version(version_id)
 
     # ── Node selection ────────────────────────────────────────────────────────
 
@@ -814,6 +860,20 @@ class AppState(rx.State):
         self.run_review_backend = ""
         self.run_review_context = ""
         self.run_review_is_submitting = False
+        # Gap 1 / Requirement C1.2 — the review_link_selector on this page
+        # reads AppState.selected_version_id, so keep it in sync with the
+        # route's version_id on every fresh visit to /run-review/{version_id}.
+        self.selected_version_id = self.version_id
+
+    async def load_run_review_linkable(self) -> None:
+        """on_load wrapper for /run-review/[version_id] (Requirement C1.2).
+
+        ``AppState.fetch_linkable_reviews`` requires a ``version_id`` argument,
+        which Reflex's ``on_load`` list can't pass inline for a dynamic route
+        segment — this wrapper reads ``self.version_id`` (auto-injected by
+        Reflex for the ``[version_id]`` segment) and forwards it.
+        """
+        await self.fetch_linkable_reviews(self.version_id)
 
     def toggle_run_review_persona(self, persona: str) -> None:
         if persona in self.run_review_selected_personas:
@@ -1229,12 +1289,38 @@ class AppState(rx.State):
     def close_fork_dialog(self) -> None:
         self._fork_dialog_open = False
 
-    # ── Gap 5: Routing Decision Helpers ─────────────────────────────────────────
+    # ── Requirement C3: Citation Navigation ─────────────────────────────────────
 
-    def _toggle_routing_edit(self) -> None:
+    selected_artifact_id: str = ""
+
+    def navigate_to_artifact(self, source_artifact: str) -> None:
+        """Resolve a finding's source_artifact (title/path) to an artifact_id
+        within current_version_artifacts and select it for highlighting.
+
+        Requirement C3.2/C3.3: sets ``selected_artifact_id`` so version_detail
+        can highlight/scroll to the matching row.  If no match is found (e.g.
+        the citation's source is ``"unknown"``), shows a toast instead of
+        navigating to a broken reference.
+        """
+        for artifact in self.current_version_artifacts:
+            if artifact.get("title") == source_artifact:
+                self.selected_artifact_id = artifact.get("artifact_id", "")
+                return
+        self.selected_artifact_id = ""
+        self.set_toast(
+            "No matching artifact found for this citation.", is_error=True
+        )
+
+    # ── Gap 5: Routing Decision Helpers ─────────────────────────────────────────
+    # NOTE: these must NOT be prefixed with `_` — Reflex only wraps public
+    # methods as EventHandler instances; an underscore-prefixed method stays a
+    # plain Python function and fails at compile time when used as an
+    # on_click/on_change trigger (discovered wiring scope_policy_panel.py).
+
+    def toggle_routing_edit(self) -> None:
         self._routing_edit_mode = not self._routing_edit_mode
 
-    def _set_routing_decision_value(self, value: str) -> None:
+    def set_routing_decision_value(self, value: str) -> None:
         self._routing_decision_value = value
 
     async def acknowledge_proposal(self, proposal_id: str) -> None:

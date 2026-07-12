@@ -8,41 +8,72 @@ to be compile-safe inside rx.foreach callbacks.
 
 import reflex as rx
 
+from web.components.proposal_form import proposal_form, proposals_list
 from web.state import AppState
 
 
 def _artifact_row(artifact: dict) -> rx.Component:
-    return rx.hstack(
-        rx.icon("file-text", size=14, color="var(--gray-9)", flex_shrink="0"),
-        rx.vstack(
-            rx.text(artifact["title"], size="2",
-                    weight="medium", truncate=True),
-            rx.hstack(
-                rx.foreach(
-                    artifact["tags"].to(list[str]),
-                    lambda tag: rx.badge(
-                        tag, color_scheme="blue", variant="soft", size="1"),
+    # Requirement C3.3 — highlight the artifact resolved via a citation click
+    # in finding_card.py, using the same visual pattern as _review_row/_node_row.
+    is_highlighted = AppState.selected_artifact_id == artifact["artifact_id"]
+    return rx.vstack(
+        rx.hstack(
+            rx.icon("file-text", size=14, color="var(--gray-9)", flex_shrink="0"),
+            rx.vstack(
+                rx.text(artifact["title"], size="2",
+                        weight="medium", truncate=True),
+                rx.hstack(
+                    rx.foreach(
+                        artifact["tags"].to(list[str]),
+                        lambda tag: rx.badge(
+                            tag, color_scheme="blue", variant="soft", size="1"),
+                    ),
+                    spacing="1",
+                    flex_wrap="wrap",
                 ),
                 spacing="1",
-                flex_wrap="wrap",
+                align="start",
+                flex="1",
+                min_width="0",
             ),
-            spacing="1",
-            align="start",
-            flex="1",
-            min_width="0",
+            rx.badge(
+                rx.cond(artifact["is_active"], "Active", "Inactive"),
+                color_scheme=rx.cond(artifact["is_active"], "green", "gray"),
+                variant="soft",
+                flex_shrink="0",
+            ),
+            spacing="3",
+            align="center",
+            width="100%",
         ),
-        rx.badge(
-            rx.cond(artifact["is_active"], "Active", "Inactive"),
-            color_scheme=rx.cond(artifact["is_active"], "green", "gray"),
-            variant="soft",
-            flex_shrink="0",
+        # Requirement B4.1 — line_count and content_preview beneath the
+        # existing title/tags row, sourced from Track A's schema fields.
+        rx.hstack(
+            rx.icon("align-left", size=11, color="var(--gray-8)", flex_shrink="0"),
+            rx.text(
+                artifact["line_count"].to(str) + " lines",
+                size="1",
+                color_scheme="gray",
+                flex_shrink="0",
+            ),
+            rx.text(
+                artifact["content_preview"].to(str),
+                size="1",
+                color_scheme="gray",
+                truncate=True,
+            ),
+            spacing="2",
+            align="center",
+            width="100%",
+            padding_left="1.5rem",
         ),
-        spacing="3",
-        align="center",
+        spacing="1",
+        align="start",
         width="100%",
         padding="0.625rem 0.75rem",
-        background="var(--gray-2)",
-        border="1px solid var(--gray-4)",
+        background=rx.cond(is_highlighted, "var(--accent-3)", "var(--gray-2)"),
+        border="1px solid",
+        border_color=rx.cond(is_highlighted, "var(--accent-6)", "var(--gray-4)"),
         border_radius="6px",
     )
 
@@ -177,14 +208,77 @@ def _action_bar() -> rx.Component:
             color_scheme="gray",
             on_click=AppState.export_node(AppState.selected_node_id),
         ),
+        # Requirement B2.1 — Fork action in the version action bar.
+        rx.button(
+            rx.icon("git-fork", size=13),
+            "Fork",
+            size="2",
+            variant="soft",
+            color_scheme="grass",
+            on_click=AppState.open_fork_dialog,
+        ),
         spacing="2",
         width="100%",
+    )
+
+
+def _fork_dialog() -> rx.Component:
+    """Requirement B2.2 — fork dialog prompting for a name, then forking the
+    selected review node via AppState.fork_node."""
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.dialog.title("Fork Review Node"),
+            rx.dialog.description(
+                "Enter a name for the forked node.",
+                size="2",
+                color_scheme="gray",
+                margin_bottom="1rem",
+            ),
+            rx.vstack(
+                rx.input(
+                    placeholder="Forked node name…",
+                    value=AppState._fork_name,
+                    on_change=AppState.set_fork_name,
+                    size="3",
+                    width="100%",
+                    auto_focus=True,
+                ),
+                rx.hstack(
+                    rx.button(
+                        "Cancel",
+                        variant="soft",
+                        color_scheme="gray",
+                        on_click=AppState.close_fork_dialog,
+                    ),
+                    rx.button(
+                        "Confirm",
+                        color_scheme="grass",
+                        on_click=[
+                            AppState.fork_node(
+                                AppState.selected_node_id, AppState._fork_name
+                            ),
+                            AppState.close_fork_dialog,
+                        ],
+                    ),
+                    spacing="3",
+                    justify="end",
+                    width="100%",
+                ),
+                spacing="4",
+                width="100%",
+            ),
+            max_width="420px",
+            padding="1.5rem",
+        ),
+        open=AppState._fork_dialog_open,
+        on_open_change=AppState.close_fork_dialog,
     )
 
 
 def version_detail() -> rx.Component:
     version = AppState.current_version
     return rx.box(
+        _fork_dialog(),
         rx.scroll_area(
             rx.vstack(
                 # Header
@@ -280,6 +374,16 @@ def version_detail() -> rx.Component:
                         rx.text("No review nodes for this version yet.",
                                 size="2", color_scheme="gray"),
                     ),
+                    spacing="2",
+                    align="start",
+                    width="100%",
+                ),
+
+                # Proposals (Requirement B1.1) — follows the Review Runs section.
+                rx.vstack(
+                    _section_label("sparkles", "Proposals"),
+                    proposal_form(version["id"].to(str)),
+                    proposals_list(version["id"].to(str)),
                     spacing="2",
                     align="start",
                     width="100%",

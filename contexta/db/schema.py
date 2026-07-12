@@ -37,7 +37,12 @@ logger = logging.getLogger(__name__)
 #           Data migration: existing proposal_jobs.review_job_id values are
 #           copied into proposal_review_links before the column is retained for
 #           backward compatibility.
-SCHEMA_VERSION = 6
+# v6 → v7: Added ``line_count``/``content_preview`` columns to ``artifacts``
+#           and the ``review_job_artifact_snapshots`` junction table (immutable
+#           artifact provenance per review job).  Data migration: backfills
+#           line_count/content_preview for existing artifact rows from their
+#           stored ``content``.
+SCHEMA_VERSION = 7
 
 # All DDL statements executed in order during migration.
 # CREATE TABLE IF NOT EXISTS ensures idempotency on re-runs.
@@ -282,6 +287,19 @@ DDL_STATEMENTS: list[str] = [
         PRIMARY KEY (proposal_job_id, review_job_id)
     )
     """,
+
+    # ── Review Job Artifact Snapshots (v7) ────────────────────────────────────
+    # Immutable record of exactly which artifacts were active on a version at
+    # the moment a review job was created (Requirement A2).  Distinct from the
+    # mutable "current" artifact set exposed via artifact_version_links — later
+    # changes to artifact.is_active must NOT retroactively alter this snapshot.
+    """
+    CREATE TABLE IF NOT EXISTS review_job_artifact_snapshots (
+        review_job_id TEXT NOT NULL REFERENCES review_jobs(id),
+        artifact_id   TEXT NOT NULL REFERENCES artifacts(id),
+        PRIMARY KEY (review_job_id, artifact_id)
+    )
+    """,
 ]
 
 
@@ -370,6 +388,41 @@ async def run_migrations(conn: "aiosqlite.Connection") -> None:
             logger.info(
                 "v5→v6 data migration: proposal_jobs.review_job_id values "
                 "copied into proposal_review_links."
+            )
+
+        # ── v6 → v7 ──────────────────────────────────────────────────────────
+        # Add line_count/content_preview columns to artifacts (existing table)
+        # and backfill them from stored content.  review_job_artifact_snapshots
+        # is an entirely new table, handled idempotently by step 1 above.
+        if stored_version < 7:
+            try:
+                await conn.execute(
+                    "ALTER TABLE artifacts ADD COLUMN line_count INTEGER NOT NULL DEFAULT 0"
+                )
+            except Exception:
+                pass  # Column already exists on fresh installs — expected.
+            try:
+                await conn.execute(
+                    "ALTER TABLE artifacts ADD COLUMN content_preview TEXT NOT NULL DEFAULT ''"
+                )
+            except Exception:
+                pass  # Column already exists on fresh installs — expected.
+
+            # Backfill: line_count = number of newline-delimited lines in
+            # content (LENGTH(content) - LENGTH(REPLACE(content, char(10), ''))
+            # counts newline characters; +1 accounts for the last line without
+            # a trailing newline). content_preview = first 280 characters.
+            # Idempotent — safe to re-run on every startup.
+            await conn.execute(
+                """
+                UPDATE artifacts
+                SET line_count = LENGTH(content) - LENGTH(REPLACE(content, char(10), '')) + 1,
+                    content_preview = SUBSTR(content, 1, 280)
+                """
+            )
+            logger.info(
+                "v6→v7 data migration: artifacts.line_count/content_preview "
+                "backfilled from stored content."
             )
 
         # ── Record new schema version ─────────────────────────────────────────

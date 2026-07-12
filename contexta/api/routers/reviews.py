@@ -102,18 +102,38 @@ def _build_review_payload(job: "api_repo.ReviewJobRow", node: Optional[object]) 
     }
     for payload in payloads:
         for f in payload.findings:
+            # Requirement A5.2/A5.3: source_artifact/citation are retained,
+            # sourced from citations[0], for backward compat with
+            # finding_card.py until Track B wires the new array.
             source = f.citations[0].file_path if f.citations else "unknown"
             excerpt = f.citations[0].excerpt if f.citations else ""
+            # Requirement A5.1: full citation array, empty list if none.
+            citation_items = [
+                schemas.CitationItem(
+                    file_path=c.file_path,
+                    line_start=c.line_start,
+                    line_end=c.line_end,
+                    excerpt=c.excerpt,
+                )
+                for c in f.citations
+            ]
             findings.append(
                 schemas.FindingItem(
                     finding_id=str(uuid.uuid4()),
+                    # Requirement A4.1: the original 12-axis ReviewDimensionEnum
+                    # value (e.g. "Risk", "NFR", "Timeline"), not the collapsed
+                    # 5-bucket category — f.dimension.value already IS the raw
+                    # enum value, so no remapping happens here.
                     type=f.dimension.value,
                     severity=_CONFIDENCE_SEVERITY.get(f.confidence.value, "MEDIUM"),
                     text=f.summary,
                     source_artifact=source,
                     citation=excerpt,
+                    citations=citation_items,
                 )
             )
+            # Requirement A4.2: summary_counts retains the 5-bucket mapping
+            # for backward compatibility with review_detail.py's summary bar.
             cat = _DIMENSION_CATEGORY.get(f.dimension, "assumptions")
             summary_counts[cat] += 1
 
@@ -293,6 +313,18 @@ async def create_review(
             len(body.linked_review_ids), job.id,
         )
 
+    # Requirement A2.2 — snapshot the version's currently-active artifact IDs
+    # into review_job_artifact_snapshots for immutable provenance.  Does NOT
+    # block/fail review creation if there are zero active artifacts.
+    active_artifacts = [
+        a for a in await api_repo.list_artifacts_for_version(conn, body.version_id)
+        if a.is_active
+    ]
+    if active_artifacts:
+        await api_repo.insert_review_job_artifact_snapshot(
+            conn, job.id, [a.id for a in active_artifacts]
+        )
+
     from contexta.api.config import load_api_config
     from contexta.api.pipeline_bridge import run_review_pipeline_task
     db_path = load_api_config().db_path
@@ -319,4 +351,34 @@ async def get_review_status(
         review_id=job.id,
         status=job.status,
         progress_message=job.progress_message,
+    )
+
+
+@router.get(
+    "/reviews/{review_id}/artifacts",
+    response_model=schemas.ReviewArtifactSnapshotResponse,
+)
+async def get_review_artifact_snapshot(
+    review_id: str,
+    conn: aiosqlite.Connection = Depends(get_db),
+) -> schemas.ReviewArtifactSnapshotResponse:
+    """Return the artifact set frozen at the moment this review was created.
+
+    Requirement A2.3 — distinct from the version's current (mutable)
+    artifact list; later artifact changes never alter this snapshot.
+    """
+    job = await api_repo.get_review_job(conn, review_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Review '{review_id}' not found.")
+
+    items = await api_repo.get_review_job_artifact_snapshot(conn, review_id)
+    return schemas.ReviewArtifactSnapshotResponse(
+        artifacts=[
+            schemas.ReviewArtifactSnapshotItem(
+                artifact_id=item.artifact_id,
+                title=item.title,
+                tags=item.tags,
+            )
+            for item in items
+        ]
     )

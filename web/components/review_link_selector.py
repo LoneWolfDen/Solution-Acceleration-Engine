@@ -17,7 +17,7 @@ def _review_link_chip(review: dict) -> rx.Component:
         rx.hstack(
             rx.text(review["persona"], size="1", weight="medium"),
             rx.text("•", size="1"),
-            rx.text(review["run_date"][:10], size="1", color_scheme="gray"),
+            rx.text(review["run_date"].to(str)[:10], size="1", color_scheme="gray"),
             spacing="1",
             align="center",
         ),
