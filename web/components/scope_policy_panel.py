@@ -50,7 +50,7 @@ def _finding_row(finding: dict) -> rx.Component:
                             size="1",
                         ),
                         rx.cond(
-                            AppState.selected_node_status == "editing_routing",
+                            AppState.routing_edit_mode,
                             rx.select.root(
                                 rx.select.trigger(width="140px", size="1"),
                                 rx.select.content(
@@ -69,7 +69,7 @@ def _finding_row(finding: dict) -> rx.Component:
                         size="1",
                         variant="soft",
                         color_scheme="indigo",
-                        disabled=~AppState.selected_node_status == "editing_routing",
+                        disabled=~AppState.routing_edit_mode,
                         on_click=AppState.submit_routing_decision(
                             AppState.selected_node_id,
                             finding["finding_id"],
@@ -109,7 +109,7 @@ def scope_policy_panel() -> rx.Component:
                 rx.spacer(),
                 rx.button(
                     rx.cond(
-                        AppState.selected_node_status == "editing_routing",
+                        AppState.routing_edit_mode,
                         "Cancel",
                         "Edit Routing",
                     ),

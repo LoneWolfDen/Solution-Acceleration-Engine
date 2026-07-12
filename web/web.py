@@ -4,6 +4,8 @@ web/web.py — Reflex application entry point.
 Routes:
   /       — Dashboard (sidebar + content pane)
   /admin  — Admin dashboard (registered via @rx.page decorator)
+  /run-review/[version_id]  — Run Review form (registered via @rx.page decorator)
+  /proposal/[proposal_id]   — Proposal detail view (registered via @rx.page decorator)
 """
 
 import reflex as rx
@@ -16,6 +18,7 @@ from web.components.toast import toast_notification
 from web.components.ingestion_modal import ingestion_modal
 from web.pages import admin as _admin_module  # noqa: F401 — registers /admin via @rx.page
 from web.pages import run_review as _run_review_module  # noqa: F401 — registers /run-review/[version_id]
+from web.pages import proposal as _proposal_module  # noqa: F401 — registers /proposal/[proposal_id]
 
 
 def index() -> rx.Component:

@@ -202,7 +202,7 @@ class ArbitrationService:
 
             # ── 2. Build prompts for token estimation ─────────────────────────
             serialised = [p.model_dump_json() for p in payloads]
-            builder = PromptBuilder(blueprint=blueprint, schema_json="{}")
+            builder = PromptBuilder(blueprint=blueprint)
             system, user = builder.build_arbitrator_prompt(serialised)
 
             # ── 3. Pre-flight token count check ───────────────────────────────
