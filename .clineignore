@@ -1,0 +1,27 @@
+# Python Environment & Cache
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build & Distribution
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Version Control & IDEs
+.git/
+.idea/
+.vscode/
+
+# Local/Temporary Files
+*.log
+.DS_Store
+

@@ -1,0 +1,23 @@
+# SYSTEM INITIALIZATION MANDATE
+- CRITICAL: You must read, memorize, and strictly enforce the operational constraints specified in `claude.md` and `AGENTS.md` before executing any task or command.
+- Use `graphify-out/GRAPH_REPORT.md` as your primary map. ALWAYS reference it first to precisely locate target modules before looking at files.
+
+# 🚨 TOKEN BUDGET & FILE HANDLING LAWS
+- NO RECURSIVE SCANS: Never execute broad subdirectory scans, open-ended file searches, or recursive terminal file listings.
+- TARGETED READING ONLY: Do not read full files if you only need specific logic blocks or definitions. Use precise line-range reads (`read_file` with line constraints).
+- CACHE RESPECT: Do not read the same file multiple times in a single task unless it has been explicitly modified.
+- NO SCRIPT REWRITES: When modifying code, use precise diff boundaries. Output ONLY the targeted lines changing. Never rewrite unaffected helper functions or surrounding boilerplate.
+
+# 💻 PROJECT EXECUTION COMMANDS
+- Build/Run: `poetry run python -m contexta`
+- Test: `poetry run pytest tests/`
+
+# 🛠️ CODE CHANGE & DEBUGGING WORKFLOW
+- ARCHITECTURE PROPOSAL: You must propose file modifications in the chat using exact code snippets/diffs and get user approval BEFORE executing disk writes.
+- DEBUG MODE: If a terminal command or test fails, stop immediately to analyze the error log. Do not blindly loop through speculative code modifications or guess solutions.
+- COMPREHENSIVE FIXES: Fix the root cause, not just the symptom. Ensure any type definitions or imports impacted by your change are updated in the same step.
+
+# 🔇 TERSE COMMUNICATION PROTOCOL
+- Speak in concise fragments. Eliminate all pleasantries, greetings, summaries, and conversational filler.
+- Never restate my request or give a multi-paragraph explanation of what you are "about to do."
+- When code fixes are successful, reply only with a one-sentence confirmation or the raw terminal verification output.
