@@ -173,7 +173,7 @@ class ArbitratorEngine:
         await _emit(ArbitrationStatus.PROCESSING, "Calling arbitrator LLM")
 
         try:
-            response = await call_llm(self._config, system, user)
+            response = await call_llm(self._config, system, user, response_model=ArbitratorResult)
         except Exception as exc:
             exc_str = str(exc)
             if "429" in exc_str or "rate" in exc_str.lower():

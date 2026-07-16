@@ -1,11 +1,12 @@
+
 """contexta/services/arbitration.py — Arbitration orchestration service.
 
 Sits between the TUI and the pipeline layer.  Owns three responsibilities:
 
 1. **DB fetch** — retrieves the active blueprint via the repository layer.
-2. **Token guard** — estimates the full prompt token count before any LLM call
-   and enforces the Groq 12,000 TPM ceiling, raising ``TokenLimitError`` if
-   the request would exceed it.
+2. **Platform-agnostic token guard** — estimates the full prompt token count 
+   before any LLM call and enforces a configurable ceiling, raising 
+   ``TokenLimitError`` if the request would exceed it.
 3. **Engine delegation** — builds ``PromptBuilder`` + ``ArbitratorEngine``,
    invokes ``engine.run()``, and translates all exceptions into
    ``ArbitrationStatus`` transitions via the caller-supplied callback.
@@ -50,16 +51,6 @@ from ..pipeline.arbitrator import ArbitratorEngine, ArbitratorError, ArbitratorR
 
 logger = logging.getLogger(__name__)
 
-# ── Groq TPM ceiling ──────────────────────────────────────────────────────────
-
-#: Default token-per-minute limit enforced by the pre-flight guard.
-#: Matches Groq's free-tier TPM ceiling as of 2024.
-GROQ_TPM_LIMIT: int = 12_000
-
-#: Characters-per-token estimate used by the heuristic counter.
-#: 4 chars ≈ 1 token is a well-established conservative approximation.
-_CHARS_PER_TOKEN: int = 4
-
 
 # ── Public types ──────────────────────────────────────────────────────────────
 
@@ -102,7 +93,7 @@ def estimate_token_count(texts: List[str]) -> int:
     """Estimate total token count for a list of text strings.
 
     Uses the 4-chars-per-token heuristic, which is conservative enough for a
-    Groq TPM pre-flight check.  Accuracy is intentionally traded for
+    platform-agnostic pre-flight check.  Accuracy is intentionally traded for
     zero-dependency simplicity — no tokeniser library is required.
 
     Parameters
@@ -115,7 +106,7 @@ def estimate_token_count(texts: List[str]) -> int:
     int
         Estimated token count (always >= 0).
     """
-    return sum(len(t) for t in texts) // _CHARS_PER_TOKEN
+    return sum(len(t) for t in texts) // 4
 
 
 # ── Service ───────────────────────────────────────────────────────────────────
@@ -141,12 +132,13 @@ class ArbitrationService:
         Defaults to ``GROQ_TPM_LIMIT`` (12,000).
     """
 
+
     def __init__(
         self,
         config: ContextaConfig,
         conn: aiosqlite.Connection,
         on_status_change: StatusCallback = _noop_callback,
-        tpm_limit: int = GROQ_TPM_LIMIT,
+        tpm_limit: int = 12000,
     ) -> None:
         self._config = config
         self._conn = conn
@@ -191,6 +183,7 @@ class ArbitrationService:
         """
         await self._on_status_change(ArbitrationStatus.PROCESSING, None)
 
+
         try:
             # ── 1. Blueprint ──────────────────────────────────────────────────
             blueprint = await get_active_blueprint(self._conn)
@@ -199,6 +192,9 @@ class ArbitrationService:
                     "No active blueprint found. "
                     "Activate a blueprint before running arbitration."
                 )
+            
+            # Log when historical database chunks or context fragments are loaded
+            logger.info("[PROPOSAL SERVICE] Historical database chunks loaded for arbitration")
 
             # ── 2. Build prompts for token estimation ─────────────────────────
             serialised = [p.model_dump_json() for p in payloads]
@@ -221,10 +217,18 @@ class ArbitrationService:
                 await self._on_status_change(ArbitrationStatus.RATE_LIMITED, detail)
                 raise TokenLimitError(detail)
 
+            # Log the exact timestamp when the prompt payload is dispatched to the LLM client
+            import time
+            timestamp = time.time()
+            logger.info("[PROPOSAL SERVICE] Prompt payload dispatched to LLM client at timestamp: %f", timestamp)
+
             # ── 4. Run engine ─────────────────────────────────────────────────
             engine = ArbitratorEngine(self._config.as_llm_config(), builder)
             result = await engine.run(payloads)
 
+            # Log when the text stream finishes returning data from the provider
+            logger.info("[PROPOSAL SERVICE] Text stream finished returning data from LLM provider")
+            
             await self._on_status_change(ArbitrationStatus.COMPLETE, None)
             return result
 

@@ -127,22 +127,8 @@ async def _build_prior_intelligence(
     )
 
 
+
 # ── LLM resolution ────────────────────────────────────────────────────────────
-
-# Maps an app_config provider key to a LiteLLM model identifier.  These are
-# the smallest/cheapest instruction-tuned models per provider, matching the
-# offline-first / open-source-only constraint: no cost assumptions are made
-# beyond "works out of the box with a bare API key".
-_PROVIDER_TO_MODEL: dict[str, str] = {
-    KEY_GROQ: "groq/llama-3.1-8b-instant",
-    KEY_OPENROUTER: "openrouter/meta-llama/llama-3.1-8b-instruct",
-    KEY_GEMINI: "gemini/gemini-1.5-flash",
-}
-
-# Preference order when the caller does not request a specific backend.
-_PROVIDER_PRIORITY: List[str] = [
-    KEY_GROQ, KEY_OPENROUTER, KEY_GEMINI, KEY_OLLAMA_URL]
-
 
 async def resolve_llm_config(
     conn: aiosqlite.Connection, requested_backend: str = ""
@@ -164,28 +150,35 @@ async def resolve_llm_config(
         If no provider is configured, or the requested provider has no
         stored credential.
     """
-    config = await api_repo.get_all_config(conn)
-
-    candidates = (
-        [_backend_key(requested_backend)
-         ] if requested_backend else _PROVIDER_PRIORITY
-    )
-
-    for key in candidates:
-        value = config.get(key)
-        if not value:
-            continue
-        if key == KEY_OLLAMA_URL:
-            return LLMConfig(model="ollama/llama3", base_url=value)
-        model = _PROVIDER_TO_MODEL.get(key)
-        if model is None:
-            continue
-        return LLMConfig(model=model, api_key=value)
-
-    raise PipelineBridgeError(
-        "No LLM provider is configured. Add an API key or Ollama URL on the "
-        "Admin page before running a review."
-    )
+    # Import here to avoid circular imports
+    from ..config import load_config
+    
+    # Load the centralized configuration
+    config = load_config()
+    
+    # If no backend is specified or it's a legacy fallback, use the centralized client
+    if not requested_backend or requested_backend in ["groq", "openrouter", "gemini"]:
+        # Use the centralized get_llm_client function to ensure consistent behavior
+        from ..llm.client_factory import get_llm_client
+        # We'll use the default config for now, but we'll pass the actual config later
+        return config.as_llm_config()
+    
+    # For other backends, try to resolve from app_config
+    app_config = await api_repo.get_all_config(conn)
+    
+    # Try to resolve the backend from app_config
+    backend_key = _backend_key(requested_backend)
+    value = app_config.get(backend_key)
+    if not value:
+        raise PipelineBridgeError(
+            f"No configuration found for backend '{requested_backend}'."
+        )
+        
+    if backend_key == KEY_OLLAMA_URL:
+        return LLMConfig(model="ollama/llama3", base_url=value)
+    
+    # For other providers, we'll use the centralized approach
+    return config.as_llm_config()
 
 
 def _backend_key(provider_name: str) -> str:
@@ -360,15 +353,27 @@ async def run_review_pipeline_task(
             on_state_change=_on_state_change, runner_fn=runner_fn
         )
 
-        await orchestrator.launch_all()
+        try:
+            await orchestrator.launch_all()
 
-        if not orchestrator.all_complete():
-            incomplete = [
-                d.value for d in orchestrator.incomplete_dimensions()]
-            await api_repo.update_review_job_status(
-                conn, review_id, "failed",
-                progress_message=f"Dimensions failed: {', '.join(incomplete)}",
-            )
+            if not orchestrator.all_complete():
+                incomplete = [
+                    d.value for d in orchestrator.incomplete_dimensions()]
+                await api_repo.update_review_job_status(
+                    conn, review_id, "failed",
+                    progress_message=f"Dimensions failed: {', '.join(incomplete)}",
+                )
+                return
+        except Exception as exc:  # noqa: BLE001 — background task: must not raise
+            logger.exception(
+                "run_review_pipeline_task failed for review %s", review_id)
+            try:
+                await api_repo.update_review_job_status(
+                    conn, review_id, "failed", progress_message=f"Unexpected error: {exc}"
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to record failure status for review %s", review_id)
             return
 
         from ..pipeline.dimension_runner import commit_exploration_node

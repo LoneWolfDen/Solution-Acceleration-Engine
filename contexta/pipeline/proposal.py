@@ -386,6 +386,18 @@ class ProposalEngine:
             artifact_context=artifact_context,
             arbitrator_summary=arbitrator_summary,
         )
+        
+        # Implement context truncation to prevent 413 Request Entity Too Large errors
+        # Truncate user context if it exceeds 100,000 characters
+        MAX_CONTEXT_CHARS = 100000
+        if len(user) > MAX_CONTEXT_CHARS:
+            # Truncate the user context while preserving the beginning and end
+            # Keep first 50,000 characters and last 50,000 characters
+            half_point = MAX_CONTEXT_CHARS // 2
+            truncated_user = user[:half_point] + "\n\n[...CONTEXT TRUNCATED...]\n\n" + user[-half_point:]
+            user = truncated_user
+            logger.warning(f"Proposal context truncated from {len(user)} to {MAX_CONTEXT_CHARS} characters")
+        
         response = await call_llm(self._config, system, user, max_tokens=8192)
         try:
             data = json.loads(response.content)

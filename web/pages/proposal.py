@@ -102,6 +102,7 @@ def _failed_view() -> rx.Component:
     )
 
 
+
 def _report_view() -> rx.Component:
     report = AppState.proposal_detail_report
     return rx.vstack(
@@ -143,13 +144,46 @@ def _report_view() -> rx.Component:
             align="center",
         ),
         rx.cond(
-            report["critical_conflicts"].to(list[str]).length() > 0,
+            report["critical_conflicts"].to(list[dict]).length() > 0,
             rx.vstack(
                 rx.text("Critical Conflicts", size="1", weight="bold", color_scheme="gray"),
                 rx.unordered_list(
                     rx.foreach(
-                        report["critical_conflicts"].to(list[str]),
-                        lambda item: rx.list_item(item, size="2"),
+                        report["critical_conflicts"].to(list[dict]),
+                        lambda item: rx.list_item(
+                            rx.vstack(
+                                rx.text(
+                                    f"Dimensions: {item['dimensions_involved'].to(str)}",
+                                    size="2",
+                                    weight="bold",
+                                ),
+                                rx.text(
+                                    item["description"].to(str),
+                                    size="2",
+                                ),
+                                rx.text(
+                                    f"Severity: {item['severity'].to(str)}",
+                                    size="1",
+                                    color_scheme="gray",
+                                ),
+                                rx.cond(
+                                    item["source_references"].to(list[str]).length() > 0,
+                                    rx.text(
+                                        f"References: {item['source_references'].to(str)}",
+                                        size="1",
+                                        color_scheme="gray",
+                                    ),
+                                    rx.fragment(),
+                                ),
+                                rx.text(
+                                    f"Suggested Mitigation: {item['suggested_mitigation'].to(str)}",
+                                    size="2",
+                                ),
+                                spacing="1",
+                                align="start",
+                            ),
+                            size="2",
+                        ),
                     ),
                 ),
                 spacing="2",
@@ -242,8 +276,6 @@ def proposal_page() -> rx.Component:
 
 # Registering the dynamic route via @rx.page adds ``proposal_id`` as an
 # auto-populated AppState var (Reflex convention for [proposal_id] segments).
-proposal_page = rx.page(
-    route="/proposal/[proposal_id]",
-    on_load=AppState.load_proposal_detail,
-    title="Proposal — SAE",
-)(proposal_page)
+@rx.page(route="/proposal/[proposal_id]", on_load=AppState.load_proposal_detail, title="Proposal — SAE")
+def proposal_page_decorated() -> rx.Component:
+    return proposal_page()

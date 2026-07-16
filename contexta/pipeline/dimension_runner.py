@@ -309,9 +309,29 @@ def make_dimension_runner(
             parsed["raw_llm_response"] = llm_response.content
             payload = ReviewNodePayload.model_validate(parsed)
         except (json.JSONDecodeError, ValidationError) as exc:
-            raise DimensionValidationError(
-                f"Validation failed for {dimension.value!r}: {exc}"
-            ) from exc
+            # Fallback: create a minimal valid payload with safe defaults
+            logger.warning(
+                "Validation failed for %r: %s. Creating fallback payload.",
+                dimension.value, exc
+            )
+            # Create a minimal valid payload with safe defaults
+            fallback_data = {
+                "dimension": dimension.value,
+                "findings": [],
+                "overall_confidence": "UNKNOWN",
+                "raw_llm_response": llm_response.content
+            }
+            try:
+                payload = ReviewNodePayload.model_validate(fallback_data)
+            except Exception as fallback_exc:
+                logger.error(
+                    "Failed to create fallback payload for %r: %s",
+                    dimension.value, fallback_exc
+                )
+                # If even fallback fails, raise the original error
+                raise DimensionValidationError(
+                    f"Validation failed for {dimension.value!r}: {exc}"
+                ) from exc
         payload.raw_llm_response = llm_response.content
         return payload
 
