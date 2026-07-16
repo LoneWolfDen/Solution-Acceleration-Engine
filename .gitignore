@@ -1,3 +1,9 @@
+graphify-out/cache/
+graphify-out/manifest.json
+contexta.db
+.web/
+node_modules/
+.venv/
 .states
 *.py[cod]
 .web
@@ -14,9 +20,5 @@ build/
 .pytest_cache/
 data/
 .env
-.venv/
-node_modules/
 *.zip
-
-contexta.db
 reflex.lock/
