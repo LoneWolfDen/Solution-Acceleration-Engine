@@ -18,3 +18,5 @@ data/
 node_modules/
 *.zip
 
+contexta.db
+reflex.lock/
