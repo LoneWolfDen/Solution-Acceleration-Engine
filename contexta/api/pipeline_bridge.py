@@ -30,6 +30,7 @@ import aiosqlite
 
 from ..db.schema import init_database
 from ..llm.provider import LLMConfig
+from ..llm.client_factory import get_default_llm_config
 from ..mcp.artifact_registry import ArtifactRegistry, IngestedArtifact
 from ..models.payloads import ReviewNodePayload
 from . import repositories as api_repo

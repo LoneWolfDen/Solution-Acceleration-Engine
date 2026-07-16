@@ -34,6 +34,9 @@ class ContextaConfig(BaseSettings):
         CONTEXTA_EXPORT_PATH   — Default directory for JSON packet exports.
         CONTEXTA_LLM_API_KEY   — API key for hosted LLM backends.
         CONTEXTA_LLM_BASE_URL  — Override base URL (e.g. for local Ollama).
+        CONTEXTA_LLM_PROVIDER  — LLM provider name (e.g. 'nvidia', 'groq', 'openai')
+        CONTEXTA_LLM_MODEL_NAME — LLM model name (e.g. 'meta/llama-3.1-70b-instruct')
+        CONTEXTA_LLM_TIMEOUT   — LLM timeout in seconds (default 120)
         CONTEXTA_LOG_LEVEL     — Logging verbosity level.
         CONTEXTA_EXECUTION_MODE — Pipeline execution mode; MVP default is UNIFIED.
     """
@@ -53,6 +56,9 @@ class ContextaConfig(BaseSettings):
     export_path: str = str(_PROJECT_ROOT / "exports")           # CONTEXTA_EXPORT_PATH
     llm_api_key: Optional[str] = None        # CONTEXTA_LLM_API_KEY
     llm_base_url: Optional[str] = None       # CONTEXTA_LLM_BASE_URL
+    llm_provider: Optional[str] = None       # CONTEXTA_LLM_PROVIDER
+    llm_model_name: Optional[str] = None     # CONTEXTA_LLM_MODEL_NAME
+    llm_timeout: int = 120                   # CONTEXTA_LLM_TIMEOUT
     log_level: str = "WARNING"               # CONTEXTA_LOG_LEVEL
 
     # ── Unified Toggle — MVP configuration path ───────────────────────────────
