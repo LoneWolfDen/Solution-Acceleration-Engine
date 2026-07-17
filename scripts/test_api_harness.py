@@ -128,9 +128,14 @@ def main():
         print("🔧 Testing Options:")
         print("1. Test Project Detail Endpoint")
         print("2. Test Version Detail Endpoint") 
-        print("3. Exit")
+        print("3. Test Artifacts List Endpoint")
+        print("4. Test Reviews List Endpoint")
+        print("5. Test Proposals List Endpoint")
+        print("6. Test Global Insights Endpoint")
+        print("7. Test Node Detail Endpoint")
+        print("8. Exit")
         
-        choice = input("\nEnter your choice (1-3): ").strip()
+        choice = input("\nEnter your choice (1-8): ").strip()
         
         if choice == '1':
             if not projects:
@@ -167,11 +172,100 @@ def main():
             print(response)
             
         elif choice == '3':
+            if not projects:
+                print("No projects available to test!")
+                continue
+                
+            project_id = input("Enter Project ID to test artifacts: ").strip()
+            if not project_id:
+                print("Invalid Project ID!")
+                continue
+                
+            api_url = f"{get_api_base_url()}/api/projects/{project_id}/artifacts"
+            print(f"\nTesting endpoint: {api_url}")
+            response = test_endpoint(api_url)
+            print("Response:")
+            print("-" * 30)
+            print(response)
+            
+        elif choice == '4':
+            if not versions:
+                print("No artifact versions available to test!")
+                continue
+                
+            version_id = input("Enter Version ID to test reviews: ").strip()
+            if not version_id:
+                print("Invalid Version ID!")
+                continue
+                
+            api_url = f"{get_api_base_url()}/api/versions/{version_id}/reviews"
+            print(f"\nTesting endpoint: {api_url}")
+            response = test_endpoint(api_url)
+            print("Response:")
+            print("-" * 30)
+            print(response)
+            
+        elif choice == '5':
+            if not versions:
+                print("No artifact versions available to test!")
+                continue
+                
+            version_id = input("Enter Version ID to test proposals: ").strip()
+            if not version_id:
+                print("Invalid Version ID!")
+                continue
+                
+            api_url = f"{get_api_base_url()}/api/versions/{version_id}/proposals"
+            print(f"\nTesting endpoint: {api_url}")
+            response = test_endpoint(api_url)
+            print("Response:")
+            print("-" * 30)
+            print(response)
+            
+        elif choice == '6':
+            # Test Global Insights Endpoint
+            api_url = f"{get_api_base_url()}/api/insights"
+            print(f"\nTesting endpoint: {api_url}")
+            response = test_endpoint(api_url)
+            print("Response:")
+            print("-" * 30)
+            print(response)
+            
+        elif choice == '7':
+            # Test Node Detail Endpoint
+            if not projects:
+                print("No projects available to test!")
+                continue
+                
+            project_id = input("Enter Project ID to find a node: ").strip()
+            if not project_id:
+                print("Invalid Project ID!")
+                continue
+                
+            # First get a node ID from the project
+            api_url = f"{get_api_base_url()}/api/projects/{project_id}/versions"
+            print(f"Fetching versions for project {project_id}...")
+            response = test_endpoint(api_url)
+            
+            # For simplicity, we'll just ask for a node ID directly
+            node_id = input("Enter Node ID to test: ").strip()
+            if not node_id:
+                print("Invalid Node ID!")
+                continue
+                
+            api_url = f"{get_api_base_url()}/api/nodes/{node_id}"
+            print(f"\nTesting endpoint: {api_url}")
+            response = test_endpoint(api_url)
+            print("Response:")
+            print("-" * 30)
+            print(response)
+            
+        elif choice == '8':
             print("Goodbye! 👋")
             break
             
         else:
-            print("Invalid choice! Please enter 1, 2, or 3.")
+            print("Invalid choice! Please enter 1, 2, 3, 4, 5, 6, 7, or 8.")
 
 if __name__ == "__main__":
     main()

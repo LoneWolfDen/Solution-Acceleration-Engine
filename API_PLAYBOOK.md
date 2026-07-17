@@ -165,3 +165,7 @@ This document lists all active FastAPI endpoints in the contexta application, or
 ### GET /api/nodes/{node_id}/export
 - **Description**: Download node as JSONPacket
 - **Database Table**: nodes
+
+### GET /api/nodes/{node_id}
+- **Description**: Full Review_Payload for a review job
+- **Database Table**: review_jobs, nodes

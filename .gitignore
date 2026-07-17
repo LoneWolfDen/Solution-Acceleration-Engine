@@ -9,8 +9,6 @@ node_modules/
 .web
 assets/external/
 *.db
-__pycache__/
-*.pyc
 *.pyo
 .coverage
 .hypothesis/
@@ -22,3 +20,14 @@ data/
 .env
 *.zip
 reflex.lock/
+.DS_Store
+# Reflex Temporary Build Folders
+.reflex/
+.web/
+web_build/
+
+# Python Cache & Databases
+__pycache__/
+*.pyc
+*.db-journal
+
