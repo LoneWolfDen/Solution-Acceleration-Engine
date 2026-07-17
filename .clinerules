@@ -1,6 +1,11 @@
 # SYSTEM INITIALIZATION MANDATE
 - CRITICAL: You must read, memorize, and strictly enforce the operational constraints specified in `claude.md` and `AGENTS.md` before executing any task or command.
 - Use `graphify-out/GRAPH_REPORT.md` as your primary map. ALWAYS reference it first to precisely locate target modules before looking at files.
+### ⚡ EFFICIENCY & EXECUTION RULES FOR CLINE + QWEN 2.5 CODER
+1. TOKEN CONSERVATION MODE: Do not print long, conversational explanations before or after code edits. Focus entirely on execution. Keep chat responses ultra-short.
+2. PRECISE EDITS: When modifying a file, rewrite ONLY the specific blocks, classes, or functions that require changes. Do not re-output thousands of lines of unmodified code.
+3. FAIL-FAST PROTOCOL: If you run a terminal command and it fails with an error, do not keep blindly modifying the same lines. Stop immediately, read the error message, trace the imports, and adjust your strategy.
+4. SYNTAX SANITY CHECKS: After writing or editing any Python file, immediately execute a quick syntax validation pass using: `python -m py_compile [file_path]` to catch any missing brackets or spacing bugs before moving to the next task.
 
 # 🚨 TOKEN BUDGET & FILE HANDLING LAWS
 - NO RECURSIVE SCANS: Never execute broad subdirectory scans, open-ended file searches, or recursive terminal file listings.
